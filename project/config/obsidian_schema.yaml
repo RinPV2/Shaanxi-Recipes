@@ -1,0 +1,14 @@
+folders:
+  recipes: "recipes"
+  page_fallbacks: "page_fallbacks"
+  indexes: "indexes"
+index_files:
+  total: "00 总索引.md"
+  series: "系列索引.md"
+  books: "书目索引.md"
+  dishes: "菜名索引.md"
+  ingredients: "食材索引.md"
+  review: "低置信度待复核.md"
+note_defaults:
+  dish_category: ""
+  aliases: []

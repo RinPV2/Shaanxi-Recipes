@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shanxi Page Review</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="toolbar">
+        <div class="group">
+          <label>Book</label>
+          <select id="book-select"></select>
+        </div>
+        <div class="group">
+          <label>Page</label>
+          <select id="page-select"></select>
+        </div>
+        <div class="group buttons">
+          <button id="prev-btn">Prev</button>
+          <button id="next-btn">Next</button>
+          <button id="save-btn">Save</button>
+          <button id="reload-btn">Reload</button>
+        </div>
+        <div class="status" id="status-text">Loading...</div>
+      </header>
+      <main class="layout">
+        <section class="panel editor-panel">
+          <div class="panel-title">Markdown</div>
+          <textarea id="editor" spellcheck="false"></textarea>
+        </section>
+        <section class="panel image-panel">
+          <div class="panel-title">Page Image</div>
+          <div class="image-wrap">
+            <img id="page-image" alt="Page preview" />
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+  </html>

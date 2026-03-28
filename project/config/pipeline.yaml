@@ -1,0 +1,25 @@
+project_root: "."
+work_root: "./work"
+vault_root: "./work/vault"
+logs_root: "./logs"
+book_manifest: "./book.yaml"
+default_process_books:
+  - "sxcp-2"
+  - "sxcp-3"
+  - "sxcp-4"
+pending_books:
+  - "sxcp-1"
+processing:
+  write_parsed_pages: true
+  write_normalized_pages: true
+  write_recipe_candidates: true
+  write_page_fallbacks: true
+  refresh_indexes_after_each_run: true
+  render_review_pages_during_process: false
+  keep_existing_outputs: true
+thresholds:
+  sparse_text_chars: 24
+  medium_text_chars: 80
+  high_text_chars: 160
+  max_title_length: 24
+  long_text_warning_chars: 1200

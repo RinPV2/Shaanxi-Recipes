@@ -1,0 +1,31 @@
+# Local Python environment
+.venv/
+__pycache__/
+*.py[cod]
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local logs
+logs/
+*.log
+
+# Generated pipeline outputs
+work/
+
+# Large source PDFs should stay local
+陕西菜谱*.pdf
+
+# Temporary or ad hoc local artifacts
+book.yaml.bak.*
+MinerU_sxcp-*.json

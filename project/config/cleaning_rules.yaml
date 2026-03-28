@@ -1,0 +1,54 @@
+section_aliases:
+  ingredients:
+    - "一、原料"
+    - "原料"
+    - "一 原料"
+    - "一、用料"
+    - "用料"
+    - "配料"
+    - "主料"
+  seasonings:
+    - "调料"
+    - "佐料"
+    - "辅料"
+  steps:
+    - "二、制法"
+    - "制法"
+    - "二、作法"
+    - "作法"
+    - "制作"
+    - "方法"
+  tips:
+    - "三、特点"
+    - "特点"
+    - "提示"
+    - "说明"
+    - "附注"
+    - "注"
+ignored_title_exact:
+  - "陕西菜谱"
+  - "目录"
+  - "目 录"
+generic_title_keywords:
+  - "目录"
+  - "菜谱"
+  - "类"
+  - "索引"
+  - "附"
+text_replacements:
+  - pattern: "\\r\\n?"
+    replacement: "\n"
+  - pattern: "[\\u3000\\t]+"
+    replacement: " "
+  - pattern: " +"
+    replacement: " "
+  - pattern: "\\n{3,}"
+    replacement: "\n\n"
+  - pattern: "[·•‧⋅]+"
+    replacement: "·"
+suspicious_patterns:
+  - "\\uFFFD"
+  - "[A-Za-z]{6,}"
+review_triggers:
+  conflicting_titles: 2
+  sparse_text_chars: 24
