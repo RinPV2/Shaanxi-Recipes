@@ -20,8 +20,13 @@ Thumbs.db
 logs/
 *.log
 
-# Generated pipeline outputs
-work/
+# Generated pipeline outputs (人工校对记录除外——不可再生,必须入库)
+work/*
+!work/page_review_md/
+!work/reports/
+work/reports/*
+!work/reports/ai_review_log.md
+!work/reports/user_confirmation_queue.md
 
 # Large source PDFs should stay local
 陕西菜谱*.pdf
