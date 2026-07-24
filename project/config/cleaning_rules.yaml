@@ -46,6 +46,10 @@ text_replacements:
     replacement: "\n\n"
   - pattern: "[·•‧⋅]+"
     replacement: "·"
+  - pattern: "\\^\\{\\\\circ\\}"
+    replacement: "°"
+  - pattern: "氽"
+    replacement: "汆"
 suspicious_patterns:
   - "\\uFFFD"
   - "[A-Za-z]{6,}"

@@ -93,3 +93,67 @@ class FullPageTests(unittest.TestCase):
         self.assertEqual(page.text_blocks[1]["block_type"], "title")  # 枚举号菜名
         self.assertEqual(page.text_blocks[2]["block_type"], "text")
         self.assertEqual(page.title_candidates, ["禽蛋类", "（八九）滑炒鸡丝"])
+
+
+class BlockReplacementTests(unittest.TestCase):
+    def test_normalize_applies_replacements_to_blocks(self) -> None:
+        from shanxi_pipeline.page_normalizer import normalize_page
+
+        page = make_page(
+            [
+                {"block_type": "text", "text": "用60^{\\circ}热水", "bbox": None, "index": 0},
+                {"block_type": "text", "text": "放入滚水锅里氽一下", "bbox": None, "index": 1},
+            ]
+        )
+        rules = {
+            "text_replacements": [
+                {"pattern": r"\^\{\\circ\}", "replacement": "°"},
+                {"pattern": "氽", "replacement": "汆"},
+            ],
+            "section_aliases": {"ingredients": [], "seasonings": [], "steps": [], "tips": []},
+            "ignored_title_exact": [],
+            "generic_title_keywords": [],
+        }
+        thresholds = {"sparse_text_chars": 1, "medium_text_chars": 2, "high_text_chars": 3}
+        normalize_page(page, rules, thresholds)
+        self.assertEqual(page.text_blocks[0]["text"], "用60°热水")
+        self.assertEqual(page.text_blocks[1]["text"], "放入滚水锅里汆一下")
+
+
+class TocEntryGuardTests(unittest.TestCase):
+    def test_toc_entry_with_page_ref_is_not_title(self) -> None:
+        page = make_page([{"block_type": "text", "text": "乱", "bbox": None, "index": 0}])
+        apply_correction(page, "【整页】水产类 / （二八）炸豆奶… (27) / 41.红烧肘子… (40)")
+        types = [b["block_type"] for b in page.text_blocks]
+        self.assertEqual(types, ["title", "text", "text"])
+
+    def test_line_patch_does_not_promote_toc_entry(self) -> None:
+        page = make_page([{"block_type": "text", "text": "（二八）炸豆好… (27)", "bbox": None, "index": 0}])
+        apply_correction(page, "（二八）炸豆奶… (27)")
+        self.assertEqual(page.text_blocks[0]["block_type"], "text")
+
+
+class InsertLineTests(unittest.TestCase):
+    def test_insert_line_prepends_block(self) -> None:
+        page = make_page([{"block_type": "text", "text": "二、制法：", "bbox": None, "index": 0}])
+        result = apply_correction(page, "【补行】水淀粉 一两 辣椒油 一两")
+        self.assertEqual(result["patched"], 1)
+        self.assertEqual(page.text_blocks[0]["text"], "水淀粉 一两 辣椒油 一两")
+        self.assertEqual(page.text_blocks[0]["block_type"], "text")
+        self.assertEqual(page.text_blocks[1]["text"], "二、制法：")
+        self.assertIn("水淀粉 一两 辣椒油 一两", page.raw_text)
+
+
+class AnchoredInsertTests(unittest.TestCase):
+    def test_insert_before_anchor_block(self) -> None:
+        page = make_page(
+            [
+                {"block_type": "text", "text": "鳝鱼煮馍的收尾文字", "bbox": None, "index": 0},
+                {"block_type": "text", "text": "一、原料：猪肋条肉 十斤（约三十份）", "bbox": None, "index": 1},
+            ]
+        )
+        result = apply_correction(page, "【补行前:一、原料：猪肋条肉 十斤（约三十份）】（二）红肉煮馍")
+        self.assertEqual(result["patched"], 1)
+        self.assertEqual(page.text_blocks[1]["text"], "（二）红肉煮馍")
+        self.assertEqual(page.text_blocks[1]["block_type"], "title")
+        self.assertEqual(page.text_blocks[2]["text"], "一、原料：猪肋条肉 十斤（约三十份）")

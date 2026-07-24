@@ -56,10 +56,21 @@ def _detect_structure(page: NormalizedPage, cleaning_rules: dict[str, Any]) -> d
 
 
 def normalize_page(page: NormalizedPage, cleaning_rules: dict[str, Any], thresholds: dict[str, Any]) -> NormalizedPage:
+    replacements = cleaning_rules.get("text_replacements", [])
     cleaned = normalize_text(page.raw_text)
-    for replacement in cleaning_rules.get("text_replacements", []):
+    for replacement in replacements:
         cleaned = re.sub(replacement["pattern"], replacement["replacement"], cleaned)
     page.cleaned_text = normalize_text(cleaned)
+
+    # 清洗规则同样作用于 text_blocks——分割器与菜谱正文取自块文本,而非 cleaned_text
+    for block in page.text_blocks:
+        text = block.get("text", "")
+        for replacement in replacements:
+            text = re.sub(replacement["pattern"], replacement["replacement"], text)
+        block["text"] = normalize_text(text)
+    page.title_candidates = [
+        block["text"] for block in page.text_blocks if block.get("block_type") == "title" and block.get("text")
+    ]
 
     structure = _detect_structure(page, cleaning_rules)
     page.structure_hints.update(structure)
