@@ -12,7 +12,7 @@ def load_yaml(path: Path) -> dict:
 
 
 def load_context(root: Path | None = None) -> PipelineContext:
-    project_root = Path(root or ".").resolve()
+    project_root = Path(root or "C:/hobby/Shanxi").resolve()
     config_root = project_root / "project" / "config"
     pipeline_config = load_yaml(config_root / "pipeline.yaml")
     cleaning_rules = load_yaml(config_root / "cleaning_rules.yaml")

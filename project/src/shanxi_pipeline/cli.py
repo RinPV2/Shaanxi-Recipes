@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import load_context
 from .confirmation_reader import parse_confirmation_source, write_confirmation_learning
+from .correction_applier import apply_correction, load_page_corrections
 from .manifest import load_books, normalize_book_manifest, upsert_book
 from .mineru_json_parser import parse_mineru_book
 from .models import PageFallbackNote, RecipeCandidate, ReviewItem
@@ -26,7 +27,7 @@ from .reports import (
     write_validation_checklist,
 )
 from .review_web import serve_review_web
-from .utils import ensure_dir, setup_logging, write_json
+from .utils import ensure_dir, setup_logging, write_json, write_text
 
 
 def _select_books(all_books, requested_ids):
@@ -67,6 +68,51 @@ def _load_existing_review_queue(path: Path, skip_book_ids: set[str]) -> list[Rev
     return rows
 
 
+def _load_title_overrides(path: Path) -> dict[str, dict[int, str]]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        book_id: {int(local_page): title for local_page, title in pages.items()}
+        for book_id, pages in payload.items()
+    }
+
+
+def _apply_title_overrides(
+    recipes: list[RecipeCandidate],
+    title_overrides: dict[str, dict[int, str]],
+    correction_log: list[dict],
+) -> None:
+    start_counts: dict[tuple[str, int], int] = defaultdict(int)
+    for recipe in recipes:
+        if recipe.local_pages:
+            start_counts[(recipe.book_id, recipe.local_pages[0])] += 1
+
+    for recipe in recipes:
+        if not recipe.local_pages:
+            continue
+        start_page = recipe.local_pages[0]
+        override = title_overrides.get(recipe.book_id, {}).get(start_page, "")
+        if not override or override == recipe.title:
+            continue
+        if start_counts[(recipe.book_id, start_page)] != 1:
+            continue
+        correction_log.append(
+            {
+                "book_id": recipe.book_id,
+                "local_page": start_page,
+                "mode": "title_override",
+                "patched": 1,
+                "unmatched": [],
+                "old_title": recipe.title,
+                "new_title": override,
+            }
+        )
+        if recipe.title not in recipe.aliases:
+            recipe.aliases.append(recipe.title)
+        recipe.title = override
+
+
 def _collect_page_counts(context) -> dict[str, int]:
     counts: dict[str, int] = {}
     root = context.work_root / "normalized_json"
@@ -103,6 +149,10 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
     books = _select_books(all_manifest_books, requested_ids)
     thresholds = context.pipeline_config["thresholds"]
 
+    corrections = load_page_corrections(context.work_root)
+    title_overrides = _load_title_overrides(context.work_root / "reports" / "title_override_map.json")
+    correction_log: list[dict] = []
+
     all_reviews = _load_existing_review_queue(context.work_root / "reports" / "review_queue.jsonl", {book.book_id for book in books})
     for book in books:
         if not book.json_path or not book.json_path.exists():
@@ -117,11 +167,15 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
         normalized_pages = []
         for page in parsed_pages:
             write_json(parsed_root / f"page-{page.local_page:04d}.json", page.to_dict())
+            correction = corrections.get((book.book_id, page.local_page))
+            if correction:
+                correction_log.append(apply_correction(page, correction))
             normalized = normalize_page(page, context.cleaning_rules, thresholds)
             normalized_pages.append(normalized)
             write_json(normalized_root / f"page-{page.local_page:04d}.json", normalized.to_dict())
 
         recipes, fallbacks, review_items = segment_book(book, normalized_pages)
+        _apply_title_overrides(recipes, title_overrides, correction_log)
         write_json(context.work_root / "recipe_candidates" / f"{book.book_id}.json", [recipe.to_dict() for recipe in recipes])
 
         for fallback in fallbacks:
@@ -157,6 +211,13 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
     build_indexes(context.vault_root, all_recipes, all_fallbacks, context.obsidian_schema)
 
     report_root = ensure_dir(context.work_root / "reports")
+    write_json(report_root / "correction_apply_log.json", correction_log)
+    unmatched_total = sum(len(entry.get("unmatched", [])) for entry in correction_log)
+    logger.info(
+        "Applied corrections on %s pages (%s unmatched lines).",
+        len(correction_log),
+        unmatched_total,
+    )
     write_review_queue(report_root, all_reviews)
     write_ingestion_manifest(report_root, all_manifest_books, recipes_by_book, fallbacks_by_book, reviews_by_book, page_counts)
     write_summary(report_root, books, all_recipes, all_fallbacks, all_reviews, page_counts)
@@ -278,54 +339,110 @@ def import_book(root: Path, book_id: str, mineru_json: str) -> None:
     process_books(root, [book_id])
 
 
+def _format_page_ranges(pages: list[int]) -> str:
+    if not pages:
+        return "无"
+    ranges = []
+    start = prev = pages[0]
+    for page in pages[1:]:
+        if page == prev + 1:
+            prev = page
+            continue
+        ranges.append(f"p{start:04d}" if start == prev else f"p{start:04d}-p{prev:04d}")
+        start = prev = page
+    ranges.append(f"p{start:04d}" if start == prev else f"p{start:04d}-p{prev:04d}")
+    return ", ".join(ranges)
+
+
+def review_progress(root: Path) -> None:
+    context = load_context(root)
+    logger = setup_logging(context.logs_root, "review-progress")
+    rows = parse_confirmation_source(context.work_root / "page_review_md")
+    by_book: dict[str, dict[int, dict]] = defaultdict(dict)
+    for row in rows:
+        if row["book_id"]:
+            by_book[row["book_id"]][int(row["local_page"])] = row
+
+    lines = ["# 校对进度", ""]
+    total_pages = 0
+    total_confirmed = 0
+    for book_dir in sorted((context.work_root / "normalized_json").iterdir()):
+        if not book_dir.is_dir():
+            continue
+        book_id = book_dir.name
+        pages = sorted(int(path.stem.split("-")[1]) for path in book_dir.glob("page-*.json"))
+        entries = by_book.get(book_id, {})
+        confirmed = [page for page in pages if entries.get(page, {}).get("confirmed")]
+        corrected = [
+            page for page in confirmed if entries.get(page, {}).get("correct_content", "").strip()
+        ]
+        remaining = [page for page in pages if page not in set(confirmed)]
+        total_pages += len(pages)
+        total_confirmed += len(confirmed)
+        lines.append(f"## {book_id}")
+        lines.append(f"- 已确认: {len(confirmed)} / {len(pages)}(其中带修正 {len(corrected)})")
+        lines.append(f"- 未确认页: {_format_page_ranges(remaining)}")
+        lines.append("")
+
+    lines.insert(2, f"- 总进度: {total_confirmed} / {total_pages}")
+    lines.insert(3, "")
+    report_path = context.work_root / "reports" / "review_progress.md"
+    write_text(report_path, "\n".join(lines).strip() + "\n")
+    logger.info("Review progress: %s/%s confirmed. Wrote %s", total_confirmed, total_pages, report_path)
+    print("\n".join(lines).strip())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Shanxi MinerU to Obsidian pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare_parser = subparsers.add_parser("prepare")
-    prepare_parser.add_argument("--root", default=".")
+    prepare_parser.add_argument("--root", default="C:/hobby/Shanxi")
 
     process_parser = subparsers.add_parser("process-existing-json")
-    process_parser.add_argument("--root", default=".")
+    process_parser.add_argument("--root", default="C:/hobby/Shanxi")
     process_parser.add_argument("--book-id", action="append", default=[])
 
     review_parser = subparsers.add_parser("review-ambiguous")
-    review_parser.add_argument("--root", default=".")
+    review_parser.add_argument("--root", default="C:/hobby/Shanxi")
     review_parser.add_argument("--book-id", action="append", default=[])
     review_parser.add_argument("--limit", type=int, default=20)
 
     render_pages_parser = subparsers.add_parser("render-book-pages")
-    render_pages_parser.add_argument("--root", default=".")
+    render_pages_parser.add_argument("--root", default="C:/hobby/Shanxi")
     render_pages_parser.add_argument("--book-id", action="append", default=[])
     render_pages_parser.add_argument("--overwrite", action="store_true")
 
     learn_parser = subparsers.add_parser("learn-from-confirmations")
-    learn_parser.add_argument("--root", default=".")
+    learn_parser.add_argument("--root", default="C:/hobby/Shanxi")
     learn_parser.add_argument("--source", default=None)
 
     build_review_parser = subparsers.add_parser("build-page-review")
-    build_review_parser.add_argument("--root", default=".")
+    build_review_parser.add_argument("--root", default="C:/hobby/Shanxi")
     build_review_parser.add_argument("--book-id", action="append", default=[])
 
     serve_review_parser = subparsers.add_parser("serve-review-web")
-    serve_review_parser.add_argument("--root", default=".")
+    serve_review_parser.add_argument("--root", default="C:/hobby/Shanxi")
     serve_review_parser.add_argument("--host", default="127.0.0.1")
     serve_review_parser.add_argument("--port", type=int, default=8765)
 
     split_parser = subparsers.add_parser("split-pdfs")
-    split_parser.add_argument("--root", default=".")
+    split_parser.add_argument("--root", default="C:/hobby/Shanxi")
     split_parser.add_argument("--book-id", action="append", default=[])
     split_parser.add_argument("--max-pages", type=int, default=200)
     split_parser.add_argument("--max-megabytes", type=int, default=100)
 
     review_priority_parser = subparsers.add_parser("build-review-priority")
-    review_priority_parser.add_argument("--root", default=".")
+    review_priority_parser.add_argument("--root", default="C:/hobby/Shanxi")
     review_priority_parser.add_argument("--book-id", action="append", default=[])
 
     import_parser = subparsers.add_parser("import-book")
-    import_parser.add_argument("--root", default=".")
+    import_parser.add_argument("--root", default="C:/hobby/Shanxi")
     import_parser.add_argument("--book-id", required=True)
     import_parser.add_argument("--mineru-json", required=True)
+
+    progress_parser = subparsers.add_parser("review-progress")
+    progress_parser.add_argument("--root", default="C:/hobby/Shanxi")
     return parser
 
 
@@ -354,6 +471,8 @@ def main() -> None:
         build_review_priority(root, args.book_id)
     elif args.command == "import-book":
         import_book(root, args.book_id, args.mineru_json)
+    elif args.command == "review-progress":
+        review_progress(root)
     else:
         parser.error(f"Unknown command: {args.command}")
 

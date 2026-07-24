@@ -10,7 +10,7 @@ This project converts existing MinerU JSON outputs for `陕西菜谱2-4` into a 
 
 ## Quick Start
 
-From `.`:
+From `C:\hobby\Shanxi`:
 
 ```powershell
 .\project\scripts\01_prepare.ps1
@@ -23,7 +23,7 @@ From `.`:
 When `sxcp-1` MinerU JSON becomes available:
 
 ```powershell
-.\project\scripts\04_import_book1_later.ps1 -MineruJson ".\MinerU_陕西菜谱1__YYYYMMDDHHMMSS.json"
+.\project\scripts\04_import_book1_later.ps1 -MineruJson "C:\hobby\Shanxi\MinerU_陕西菜谱1__YYYYMMDDHHMMSS.json"
 ```
 
 That command only processes `sxcp-1` and then refreshes aggregate indexes.
@@ -31,16 +31,16 @@ That command only processes `sxcp-1` and then refreshes aggregate indexes.
 ## Direct Commands
 
 ```powershell
-$env:PYTHONPATH = ".\project\src"
-.\.venv\Scripts\python.exe -m shanxi_pipeline.cli prepare
-.\.venv\Scripts\python.exe -m shanxi_pipeline.cli process-existing-json --book-id sxcp-2 --book-id sxcp-3 --book-id sxcp-4
-.\.venv\Scripts\python.exe -m shanxi_pipeline.cli review-ambiguous --book-id sxcp-3
-.\.venv\Scripts\python.exe -m shanxi_pipeline.cli import-book --book-id sxcp-1 --mineru-json "D:\path\to\MinerU_陕西菜谱1.json"
+$env:PYTHONPATH = "C:\hobby\Shanxi\project\src"
+C:\hobby\Shanxi\.venv\Scripts\python.exe -m shanxi_pipeline.cli prepare
+C:\hobby\Shanxi\.venv\Scripts\python.exe -m shanxi_pipeline.cli process-existing-json --book-id sxcp-2 --book-id sxcp-3 --book-id sxcp-4
+C:\hobby\Shanxi\.venv\Scripts\python.exe -m shanxi_pipeline.cli review-ambiguous --book-id sxcp-3
+C:\hobby\Shanxi\.venv\Scripts\python.exe -m shanxi_pipeline.cli import-book --book-id sxcp-1 --mineru-json "D:\path\to\MinerU_陕西菜谱1.json"
 ```
 
 ## Validation
 
 ```powershell
-$env:PYTHONPATH = ".\project\src"
-.\.venv\Scripts\python.exe -m unittest discover -s .\project\tests -v
+$env:PYTHONPATH = "C:\hobby\Shanxi\project\src"
+C:\hobby\Shanxi\.venv\Scripts\python.exe -m unittest discover -s C:\hobby\Shanxi\project\tests -v
 ```

@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from .confirmation_reader import parse_confirmation_markdown
+from .confirmation_reader import parse_confirmation_markdown, parse_confirmation_source
 from .manifest import load_books
 from .utils import dump_yaml, ensure_dir, normalize_text, write_json, write_text
 
@@ -135,6 +135,13 @@ def build_page_review_dataset(context, requested_ids: list[str] | None = None) -
         books = [book for book in books if book.enabled and book.status != "pending"]
 
     confirmation_map = _load_confirmation_map(context.work_root / "reports" / "user_confirmation_queue.md")
+    # 已写入 page_review_md 的校对记录优先于 legacy 队列,防止 rebuild 抹掉既有确认
+    if review_md_root.exists():
+        for row in parse_confirmation_source(review_md_root):
+            if not row["book_id"]:
+                continue
+            if row["confirmed"] or row["notes"] or row["correct_content"]:
+                confirmation_map[(row["book_id"], int(row["local_page"]))] = row
     recipe_map = _load_recipe_map(context.work_root / "recipe_candidates")
     fallback_map = _load_fallback_map(context.work_root / "page_fallback_notes")
 

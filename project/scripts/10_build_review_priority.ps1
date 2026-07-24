@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Root = ".",
+    [string]$Root = "C:\hobby\Shanxi",
     [string[]]$BookIds = @("sxcp-2", "sxcp-3", "sxcp-4")
 )
 

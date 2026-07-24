@@ -64,6 +64,19 @@ def export_notes(
     for note in fallbacks:
         note.note_path = str(fallback_root / fallback_filename(note))
 
+    # 标题修正会改变文件名;清掉不再对应任何笔记的旧导出文件,避免 vault 积累孤儿
+    expected_recipes = {Path(recipe.note_path).name for recipe in recipes}
+    expected_fallbacks = {Path(note.note_path).name for note in fallbacks}
+    for folder, expected in (
+        (recipe_root, expected_recipes),
+        (vault_root / folders["recipes"], expected_recipes),
+        (fallback_root, expected_fallbacks),
+        (vault_root / folders["page_fallbacks"], expected_fallbacks),
+    ):
+        for stale in folder.glob("*.md"):
+            if stale.name not in expected:
+                stale.unlink()
+
     assign_related_notes(recipes, fallbacks)
 
     for recipe in recipes:

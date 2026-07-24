@@ -73,6 +73,9 @@ def _extract_page_title_override(correct_content: str) -> str:
     if not tokens:
         return ""
     first = tokens[0]
+    if PAGE_REF_RE.search(first):
+        # 带页码引用的行是目录条目,不是菜谱标题
+        return ""
     if "原料" in first or "制法" in first or "特点" in first or first == "目录" or first.endswith("类"):
         return ""
     if ":" in first or "：" in first:

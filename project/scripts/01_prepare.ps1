@@ -1,5 +1,5 @@
 param(
-    [string]$Root = "."
+    [string]$Root = "C:\hobby\Shanxi"
 )
 
 $ErrorActionPreference = "Stop"

@@ -1,5 +1,5 @@
 param(
-    [string]$Root = ".",
+    [string]$Root = "C:\hobby\Shanxi",
     [string[]]$BookId = @("sxcp-1", "sxcp-2", "sxcp-3", "sxcp-4"),
     [int]$MaxPages = 200,
     [int]$MaxMegabytes = 100

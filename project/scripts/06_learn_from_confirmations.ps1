@@ -1,6 +1,6 @@
 param(
-    [string]$Root = ".",
-    [string]$Source = ".\work\page_review_md"
+    [string]$Root = "C:\hobby\Shanxi",
+    [string]$Source = "C:\hobby\Shanxi\work\page_review_md"
 )
 
 $ErrorActionPreference = "Stop"

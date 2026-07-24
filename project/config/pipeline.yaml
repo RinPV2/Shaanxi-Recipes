@@ -1,14 +1,14 @@
-project_root: "."
-work_root: "./work"
-vault_root: "./work/vault"
-logs_root: "./logs"
-book_manifest: "./book.yaml"
+project_root: "C:/hobby/Shanxi"
+work_root: "C:/hobby/Shanxi/work"
+vault_root: "C:/hobby/Shanxi/work/vault"
+logs_root: "C:/hobby/Shanxi/logs"
+book_manifest: "C:/hobby/Shanxi/book.yaml"
 default_process_books:
+  - "sxcp-1"
   - "sxcp-2"
   - "sxcp-3"
   - "sxcp-4"
-pending_books:
-  - "sxcp-1"
+pending_books: []
 processing:
   write_parsed_pages: true
   write_normalized_pages: true

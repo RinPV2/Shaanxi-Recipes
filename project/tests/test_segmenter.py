@@ -14,8 +14,8 @@ class SegmenterTests(unittest.TestCase):
             book_id="sxcp-2",
             series=2,
             file_name="陕西菜谱2.pdf",
-            file_path="./陕西菜谱2.pdf",
-            mineru_json="./example.json",
+            file_path="C:/hobby/Shanxi/陕西菜谱2.pdf",
+            mineru_json="C:/hobby/Shanxi/example.json",
             status="ready",
             enabled=True,
         )

@@ -43,3 +43,14 @@ class ReviewPriorityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TitleOverrideExtractionTests(unittest.TestCase):
+    def test_toc_style_line_is_not_a_title_override(self) -> None:
+        from shanxi_pipeline.review_priority import _extract_page_title_override
+
+        self.assertEqual("", _extract_page_title_override("（二八）炸豆奶… (27)"))
+
+    def test_plain_enumerated_title_is_extracted(self) -> None:
+        from shanxi_pipeline.review_priority import _extract_page_title_override
+
+        self.assertEqual("烧肚裆", _extract_page_title_override("（七四） 烧肚裆"))
