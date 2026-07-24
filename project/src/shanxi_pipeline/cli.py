@@ -12,6 +12,7 @@ from .manifest import load_books, normalize_book_manifest, upsert_book
 from .mineru_json_parser import parse_mineru_book
 from .models import PageFallbackNote, RecipeCandidate, ReviewItem
 from .obsidian_exporter import build_indexes, export_notes
+from .page_image_exporter import export_book_page_images
 from .page_normalizer import normalize_page
 from .page_review_builder import build_page_review_dataset
 from .pdf_reviewer import render_book_pages, render_review_pages
@@ -339,6 +340,23 @@ def import_book(root: Path, book_id: str, mineru_json: str) -> None:
     process_books(root, [book_id])
 
 
+def export_page_images(root: Path, requested_ids: list[str] | None = None, overwrite: bool = False) -> None:
+    context = load_context(root)
+    logger = setup_logging(context.logs_root, "export-page-images")
+    normalize_book_manifest(context.book_manifest)
+    books = _select_books(load_books(context.book_manifest), requested_ids)
+    output_root = context.project_root / "assets" / "pages"
+    total = 0
+    for book in books:
+        if not book.pdf_path.exists():
+            logger.warning("Skipping %s because PDF is missing.", book.book_id)
+            continue
+        written = export_book_page_images(book, output_root, overwrite=overwrite)
+        total += len(written)
+        logger.info("Exported %s page images for %s.", len(written), book.book_id)
+    logger.info("Exported %s total page images to %s.", total, output_root)
+
+
 def _format_page_ranges(pages: list[int]) -> str:
     if not pages:
         return "无"
@@ -443,6 +461,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     progress_parser = subparsers.add_parser("review-progress")
     progress_parser.add_argument("--root", default="C:/hobby/Shanxi")
+
+    export_images_parser = subparsers.add_parser("export-page-images")
+    export_images_parser.add_argument("--root", default="C:/hobby/Shanxi")
+    export_images_parser.add_argument("--book-id", action="append", default=[])
+    export_images_parser.add_argument("--overwrite", action="store_true")
     return parser
 
 
@@ -473,6 +496,8 @@ def main() -> None:
         import_book(root, args.book_id, args.mineru_json)
     elif args.command == "review-progress":
         review_progress(root)
+    elif args.command == "export-page-images":
+        export_page_images(root, args.book_id, args.overwrite)
     else:
         parser.error(f"Unknown command: {args.command}")
 
