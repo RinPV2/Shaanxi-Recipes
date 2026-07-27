@@ -14,6 +14,8 @@ LINE_SEPARATOR = " / "
 FULL_PAGE_PREFIX = "【整页】"
 INSERT_LINE_PREFIX = "【补行】"
 INSERT_BEFORE_RE = re.compile(r"^【补行前:(?P<anchor>[^】]+)】(?P<text>.+)$")
+# OCR 原行错乱到相似度无法命中时,锚文本抄 OCR 原文以定位待替换的块
+REPLACE_LINE_RE = re.compile(r"^【替行:(?P<anchor>[^】]+)】(?P<text>.+)$")
 MATCH_THRESHOLD = 0.6
 # 目录条目(尾带页码引用)不是菜谱标题,不得升为 title 块
 TOC_PAGE_REF_RE = re.compile(r"[（(]\s*\d+\s*[)）]\s*$")
@@ -84,7 +86,34 @@ def apply_correction(page: NormalizedPage, correct_content: str) -> dict[str, An
     used_indices: set[int] = set()
     inserted_blocks: list[dict[str, Any]] = []
     anchored_inserts: list[tuple[int, dict[str, Any]]] = []
+    def _best_block(anchor: str, skip_used: bool) -> tuple[int, float]:
+        best_index, best_ratio = -1, 0.0
+        for index, block in enumerate(page.text_blocks):
+            if skip_used and index in used_indices:
+                continue
+            ratio = SequenceMatcher(None, block.get("text", ""), anchor).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_index = ratio, index
+        return best_index, best_ratio
+
+    def _set_block_text(block: dict[str, Any], text: str) -> None:
+        block["text"] = text
+        if is_recipe_title(text) and not TOC_PAGE_REF_RE.search(text):
+            block["block_type"] = "title"
+
     for line in split_correct_content(correct_content):
+        replaced = REPLACE_LINE_RE.match(line)
+        if replaced:
+            anchor = normalize_text(replaced.group("anchor"))
+            text = normalize_text(replaced.group("text"))
+            best_index, best_ratio = _best_block(anchor, skip_used=True)
+            if text and best_index >= 0 and best_ratio >= MATCH_THRESHOLD:
+                used_indices.add(best_index)
+                _set_block_text(page.text_blocks[best_index], text)
+                result["patched"] += 1
+            else:
+                result["unmatched"].append(line)
+            continue
         matched = INSERT_BEFORE_RE.match(line)
         if matched:
             # 在与锚文本最相似的块之前插入(用于页中丢失的标题行等)

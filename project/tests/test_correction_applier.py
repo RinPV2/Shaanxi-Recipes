@@ -157,3 +157,35 @@ class AnchoredInsertTests(unittest.TestCase):
         self.assertEqual(page.text_blocks[1]["text"], "（二）红肉煮馍")
         self.assertEqual(page.text_blocks[1]["block_type"], "title")
         self.assertEqual(page.text_blocks[2]["text"], "一、原料：猪肋条肉 十斤（约三十份）")
+
+
+class ReplaceLineTests(unittest.TestCase):
+    def test_replace_garbled_block_by_anchor(self) -> None:
+        page = make_page(
+            [
+                {"block_type": "text", "text": "调料: 姜 10 克 麦醋 2 克 蒜蓉 1 克 一钱", "bbox": None, "index": 0},
+                {"block_type": "text", "text": "食盐 五分 绍酒 二钱", "bbox": None, "index": 1},
+            ]
+        )
+        result = apply_correction(
+            page, "【替行:调料: 姜 10 克 麦醋 2 克 蒜蓉 1 克 一钱】调料: 姜 米 半钱 葱 花 一钱"
+        )
+        self.assertEqual(result["patched"], 1)
+        self.assertEqual(result["unmatched"], [])
+        self.assertEqual(page.text_blocks[0]["text"], "调料: 姜 米 半钱 葱 花 一钱")
+        self.assertEqual(page.text_blocks[1]["text"], "食盐 五分 绍酒 二钱")
+
+    def test_replace_promotes_recipe_title(self) -> None:
+        page = make_page(
+            [{"block_type": "text", "text": "（四）熬炒子鸡", "bbox": None, "index": 0}]
+        )
+        result = apply_correction(page, "【替行:（四）熬炒子鸡】（一〇四）熬炒子鸡")
+        self.assertEqual(result["patched"], 1)
+        self.assertEqual(page.text_blocks[0]["block_type"], "title")
+        self.assertIn("（一〇四）熬炒子鸡", page.title_candidates)
+
+    def test_replace_unmatched_when_anchor_absent(self) -> None:
+        page = make_page([{"block_type": "text", "text": "毫不相干的文字", "bbox": None, "index": 0}])
+        result = apply_correction(page, "【替行:完全找不到的锚文本内容】新的正确文字")
+        self.assertEqual(result["patched"], 0)
+        self.assertEqual(len(result["unmatched"]), 1)
