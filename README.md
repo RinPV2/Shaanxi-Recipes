@@ -18,9 +18,13 @@ python -m shanxi_pipeline.cli process-existing-json --root <repo-root>
 
 详细命令与项目状态见 [CLAUDE.md](CLAUDE.md)。
 
-## 目标
+## 网站
 
-一个 Obsidian 风格的菜谱网站:浏览菜谱、原书页面图对照、纠错反馈、标签与食材反向索引。(建设中)
+**<https://rinpv2.github.io/Shanxi>** — 浏览全部 636 道菜、原书页图逐页对照、一键提交纠错。
+
+站点由 `python -m shanxi_pipeline.cli build-site --root .` 从 vault 生成:纯静态 HTML/CSS/JS,无外部依赖与构建步骤,以仓库根为发布目录(页图 `assets/pages/` 原地复用)。
+
+后续计划:食材反向索引、标签浏览(待校对复审完成后再做)。
 
 ## 许可
 

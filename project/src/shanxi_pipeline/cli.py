@@ -13,6 +13,7 @@ from .mineru_json_parser import parse_mineru_book
 from .models import PageFallbackNote, RecipeCandidate, ReviewItem
 from .obsidian_exporter import build_indexes, export_notes
 from .page_image_exporter import export_book_page_images
+from .site_builder import build_site
 from .page_normalizer import normalize_page
 from .page_review_builder import build_page_review_dataset
 from .pdf_reviewer import render_book_pages, render_review_pages
@@ -462,6 +463,9 @@ def build_parser() -> argparse.ArgumentParser:
     progress_parser = subparsers.add_parser("review-progress")
     progress_parser.add_argument("--root", default="C:/hobby/Shanxi")
 
+    site_parser = subparsers.add_parser("build-site")
+    site_parser.add_argument("--root", default=".")
+
     export_images_parser = subparsers.add_parser("export-page-images")
     export_images_parser.add_argument("--root", default="C:/hobby/Shanxi")
     export_images_parser.add_argument("--book-id", action="append", default=[])
@@ -498,6 +502,8 @@ def main() -> None:
         review_progress(root)
     elif args.command == "export-page-images":
         export_page_images(root, args.book_id, args.overwrite)
+    elif args.command == "build-site":
+        build_site(root)
     else:
         parser.error(f"Unknown command: {args.command}")
 
