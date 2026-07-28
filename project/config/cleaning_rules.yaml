@@ -86,6 +86,13 @@ text_replacements:
     replacement: "油馍"
   - pattern: "蛋锅面"
     replacement: "蛋黄面"
+  # ——— 表格块内的 OCR 错字（这些表此前被整块丢弃、从未经人校对）———
+  # 「餞」是「饯」的繁体而非「钱」的异体，故限定在数字后才替换，
+  # 避免把「蜜餞」误改成「蜜钱」。
+  - pattern: "([一二三四五六七八九十半])餞"
+    replacement: "\\1钱"
+  - pattern: "味\\s*粤"
+    replacement: "味精"
 suspicious_patterns:
   - "\\uFFFD"
   - "[A-Za-z]{6,}"
