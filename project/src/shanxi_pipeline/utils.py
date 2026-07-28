@@ -79,9 +79,16 @@ def safe_filename(value: str, max_length: int = 80) -> str:
     return normalized[:max_length].rstrip(" .-_")
 
 
+# 原书菜名常为排版对齐在字间插空格（「糖 醋 排 骨」「炝 肚 块」）。这些空格会一路
+# 渗进 vault 标题、笔记文件名和站点 URL（如 sxcp-2-p0048-糖-醋-排-骨）。
+# 只删与汉字或括号相邻的空格，避免误伤可能存在的西文内容。
+_TITLE_PAD = re.compile(r"(?<=[一-鿿（）()、])\s+|\s+(?=[一-鿿（）()、])")
+
+
 def strip_recipe_enumerator(title: str) -> str:
     cleaned = normalize_text(title)
     cleaned = re.sub(r"^[（(]?[一二三四五六七八九十百零〇0-9]+[）)]\s*", "", cleaned)
+    cleaned = _TITLE_PAD.sub("", cleaned)
     return cleaned.strip("：: ")
 
 

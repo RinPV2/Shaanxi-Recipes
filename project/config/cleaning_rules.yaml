@@ -70,6 +70,22 @@ text_replacements:
     replacement: "虾米炖"
   - pattern: "山查糕"
     replacement: "山楂糕"
+  # ——— 原书正文与目录用字打架时的规范名（用户 2026-07-28 逐条裁定）———
+  # 单页记录一律照该页所印；此处只统一进入成品库的规范名。
+  # 取舍不按「一律跟正文/一律跟目录」，而是逐条按字义定：
+  # 油馍取正文（目录作油果）、蛋黄面取目录（正文作蛋锅面）。
+  - pattern: "柽花"
+    replacement: "桂花"
+  - pattern: "凤干"
+    replacement: "风干"
+  - pattern: "时晨"
+    replacement: "时辰"
+  - pattern: "饱子"
+    replacement: "包子"
+  - pattern: "油果"
+    replacement: "油馍"
+  - pattern: "蛋锅面"
+    replacement: "蛋黄面"
 suspicious_patterns:
   - "\\uFFFD"
   - "[A-Za-z]{6,}"
