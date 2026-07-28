@@ -50,6 +50,26 @@ text_replacements:
     replacement: "°"
   - pattern: "氽"
     replacement: "汆"
+  # ——— 现代汉语规范化（2026-07-28）———
+  # 字形辨认仍以页图为准；此处只做「认清之后」的输出归一化：
+  # 生僻字 / 异体字 / 方言古语残留 → 现代通行写法，原书原样在校对记录 notes 中留痕。
+  # 「介」为常用字，只在明确的刀工语境下替换，避免误伤「介绍」等正常用法。
+  - pattern: "搕"
+    replacement: "磕"
+  - pattern: "介(成|浅|一刀)"
+    replacement: "剞\\1"
+  - pattern: "茨汁"
+    replacement: "芡汁"
+  - pattern: "粩糟"
+    replacement: "醪糟"
+  - pattern: "揽匀"
+    replacement: "搅匀"
+  - pattern: "密汁羊尾"
+    replacement: "蜜汁羊尾"
+  - pattern: "虾米饨"
+    replacement: "虾米炖"
+  - pattern: "山查糕"
+    replacement: "山楂糕"
 suspicious_patterns:
   - "\\uFFFD"
   - "[A-Za-z]{6,}"
