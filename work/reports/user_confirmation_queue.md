@@ -4,7 +4,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["陕西菜谱"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0001.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0001.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第1页 页面回退"]
 - content_preview: 陕西菜谱 / (二)
@@ -17,7 +17,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["引进外地名菜"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0002.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0002.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第2页 页面回退"]
 - content_preview: 引进外地名菜
@@ -30,7 +30,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["目录", "猪牛羊肉类"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0003.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0003.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第3页 页面回退"]
 - content_preview: 目录 / 猪牛羊肉类 / 猪肉小炒…（1.） / 水煮肉片…（1） / 酱爆肉丝… (2） / 烂糊肉丝… (3） / 鱼香肉丝… （3） / 肉丝黄豆汤…（4） / 瓜姜里脊丝…（5） / 花生辣里脊丁…（6） / 骨香里脊… (7） / 棉花肉丝… (8） / 彩云里脊… (9） / 酸辣里脊… (10) / 焦溜里脊片… (11) / 炸麻叶肉… (12) / 炒三丝戴帽… (13) / 炸五香脆肉… (14) / 炸溜鹅黄肉卷…（15） / 炸佛手卷… (16) / 炸广东肉… (17) / 炸猪排… (18） / 炸玫瑰球… (19) / 干炸丸子… (19) / 龙眼丸子… (20) / 炸溜丸子… (21) / 红心丸子… (22) / 南煎丸子… (23) / 煎猪排… (24) / 蛋白肉… (25） / 腐乳肉… (25） / 干菜肉… (26) / 黄焖酥肉… (27) / 红焖猪肉… (28） / 回锅肉… (29) / 木椁肉… (29） / 过油肉… (30） / 桂花肉… (31) / 生爆盐煎肉… (32) / 松籽酿方肉… (33) / 锅焗肉· (34) / 萝卜连锅… (35）
@@ -43,7 +43,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["水产类"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0004.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0004.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第4页 页面回退"]
 - content_preview: 砂锅白肉… (35） / 去皮大烤… (36） / 柳叶大烤… (37) / 锅烧折骨… (38） / 象牙排骨… (39) / 干炸排骨… (39) / 糖醋排骨… (40） / 竹笋肉骨酱… (41) / 软炸肘子… (42) / 回锅肘子… (43) / 烧肉米金皮… (44) / 清汤酿蹄筋… (45) / 清汤捶里脊片…（46） / 砂锅豆腐… (46) / 炒精片… (47) / 炒仿鸽蛋… (48） / 鱼香猪肝… (49) / 炒肝油 (50) / 火爆三样… (51) / 余三\mathfrak{F}（52） / 桂花肚仁… (53) / 软炸肚仁… (53) / 炒肚丝… (54) / 鳖香腰花… (55) / 花生辣腰花……(56) / 烧圈子… (57) / 酸辣肥肠… (58) / 糖醋肥肠… (59) / 锅烧火腿… (60) / 锅烧羊肉… (61) / 盐爆肚梁… (61) / 奶汤伞胆… (62) / 涮羊肉… (63) / 水产类 / 烧肚脐… (65) / 烧刻水… (65） / 红烧头尾… (66） / 清汤鱼卷… (67) / 软溜鱼扇… (68) / 奶汁鱼丁… (69) / 五柳鱼… (70-) / 豆瓣鱼… (71) / 豆腐鲫鱼… (72) / 糖醋三丝鱼卷… (73) / 烩三色鱼丸…（74） / 糖醋鲤鱼配面
@@ -56,7 +56,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["禽蛋类"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0005.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0005.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第5页 页面回退"]
 - content_preview: 松鼠虫… (76） / 红烧鲤鱼… (77) / 锅烧鱼… (78) / 炸高力鱼条… (79) / 炒鳝糊… (80） / 鳝鱼大烤… (81) / 糖醋带鱼… (82) / 墨鱼大烤… (82） / 酱爆墨鱼卷… (83） / 墨鱼汤三样… (84) / 肉米烧墨鱼…（85） / 墨鱼氊里脊片… (86) / 炒墨鱼肉丝… (87) / 芙蓉虾仁… (88) / 禽蛋类 / 滑炒鸡丝… (89) / 雪花鸡… (90） / 锅烧全鸡… (90) / 生烧鸡膀… (91) / 熬炒仔鸡… (92) / 干烧仔鸡… (93） / 油淋仔鸡… (94) / 炸酥鸡… (95） / 花生辣鸡丁………(96) / 炸八块… (97) / 酱爆鸡丁… (98) / 明月红松鸡… (99) / 骨香鸡… (100) / 奶油鸡骨酱… (101) / 雪里葡萄… (102) / 口磨氽胞肝… (102) / 三不粘… (103) / 糖醋合包蛋… (104) / 带馅合包蛋… (105) / 肉丁胀蛋… (106) / 鸡草豌豆… (106) / 芙蓉鸡片汤… (107) / 鸡茸豆花汤… (108) / 仿母子鸡… (109) / 酿香菇 (110) / 酿香菇合… (111) / 什锦铁锅蛋……(112) / 锅烧鸭… (113)
@@ -69,7 +69,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["山珍海味类", "素菜类"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0006.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0006.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第6页 页面回退"]
 - content_preview: 山珍海味类 / 清汤银耳… (115) / 冰糖炖银耳… (115) / 雪塔银耳… (116) / 菊花干贝 ………………………………………… (117) / 红烧鸡米海参… (118) / 芙蓉海参… (119) / 鸡腿扒海参……(120) / 奶油扒海参… (121) / 清汤鱿鱼… (122) / 虾籽烧鱿鱼… (122) / 鱿鱼什锦… (123) / 酿五彩鱼肚… (124) / 红烧鱼肚… (125) / 盐爆鱿鱼卷… (126) / 烧猴头… (127) / 猴头芙蓉底… (128) / 扒鱼翅… (129) / 三丝鱼翅… (130) / 桂花鱼翅… (131) / 砂锅鱼翅… (131) / 砂锅什锦… (132) / 清汤燕菜 (133) / 绣球鱼肚… (134) / 仿蟹黄烧鱼肚… (135) / 素菜类 / 素狮子头… (137) / 五柳素鱼… (138) / 炮冬笋… (139) / 清汤素鸽蛋… (139) / 肉米烧菜花… (140) / 锅巴口蘑… (141) / 什锦干丝… (142) / 酱桃仁… (143) / 红烧面筋… (144) / 酿面筋… (144) / 锅贴豆腐… (145) / 白扒豆腐… (146) / 蛋黄豆腐… (147) / 家常豆腐… (148)
@@ -82,7 +82,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["甜菜类", "其它类"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0007.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0007.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第7页 页面回退"]
 - content_preview: 菱角豆腐… (149) / 锅豆腐… (150) / 雪花豆腐… (150) / 品碗豆腐… (151) / 虾仁锅塌豆腐… (152) / 虾酱烩豆腐… (153) / 酱爆茄子… (154) / 鱼鳞茄子… (155) / 奶油扒白菜… (155) / 虾籽烧菱白… (156) / 烩香菇笋子… (157) / 甜菜类 / 拔丝梨… (159) / 八锦甜饭… (159) / 炸山楂肉夹… (161) / 蜜汁樱桃肉… (161) / 糯米梨… (162) / 酿苹果罐… (163) / 雪里锅巴… (164) / 虎皮山药… (164) / 豆沙蛋酥饼… (165) / 其它类 / 酱瓜山鸡丝… (167) / 榨菜肉丝汤… (167) / 三丝汤… (168) / 猪肝汤 (169) / 腰花汤… (170)
@@ -95,7 +95,7 @@
 - confidence: low
 - reasons: page-level fallback requires review
 - title_candidates: ["猪牛羊肉类"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0008.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0008.png
 - current_recipe_candidates: []
 - current_fallback_candidates: ["sxcp-2 第8页 页面回退"]
 - content_preview: 猪牛羊肉类
@@ -108,7 +108,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["(一) 猪肉小炒", "一、原料：", "二、制法：", "（二）水煮肉片", "一、原料："]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0009.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0009.png
 - current_recipe_candidates: ["猪肉小炒", "水煮肉片"]
 - current_fallback_candidates: []
 - content_preview: (一) 猪肉小炒 / 一、原料： / 主料：肥瘦猪肉 二两 / 配料：水粉条 三两 / 调料：葱 花 三钱 姜米 钱 / 盐 五. 分 酱 油 四钱 / 绍酒 二钱味精 二分 / 菜籽油 一两半 / 二、制法： / 1. 肥瘦肉切录豆大的丁，用酱油一钱抓匀。 / 2. 炒勺座旺火上烧热，用油滑过。加入油一两烧六成热，下肉丁煸炒八成熟，烹入绍酒、酱油、味精；随即放入粉条，炒至粉条上色，淋油半两颠簸出勺即成。 / 三、特点: 此菜系干燥硬炒, 色泽黄红, 干香味浓。 / （二）水煮肉片 / 一、原料： / 主料：猪里脊肉 五两 / 配料：净莴笋 二两 / 调料：菜籽油 二两 葱白 一钱 / 辣椒面 二钱 花椒面 一分 / 姜 二分 食盐 一分 / 豆瓣辣酱 三钱 味精 一分 / 酱油 三钱 绍酒 三钱
@@ -121,7 +121,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["二、制法：", "三、特点：", "（三）酱爆肉丝", "一、原料：", "制法："]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0010.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0010.png
 - current_recipe_candidates: ["水煮肉片", "酱爆肉丝"]
 - current_fallback_candidates: []
 - content_preview: 二、制法： / 1. 里脊肉（扁担肉、肋条肉均可） 橄丝切长一寸宽六分的薄片；笋切片，葱切段，辣角切短节，辣酱剁细。 / 2. 旺火坐勺加油（二两）烧七成热，下葱、姜爆出味，捞去不用；随下辣椒面、花椒面稍炒，即下辣酱、笋片合炒均匀，加肉清汤（八两）下酱油、绍酒、味精烧沸；同时用食盐、水淀粉将肉片抹匀抖散，下勺内（约二、三分钟）煮透，倒入碗中，淋辣椒油，撒花椒盐即成。 / 三、特点： / 色红味浓，麻辣咸香，肉片脆嫩，宜于冬令。系川味名菜。 / 注: 肉片抹淀粉是关键, 要求抹的不湿不干, 粉面不宜过多, 肉片下锅后要用筷子拨散, 以免脱荧。 / （三）酱爆肉丝 / 一、原料： / 主料：瘦猪肉 三两 / 配料：葱 丝 二钱 / 调料：菜籽油 两 蛋汁 三钱 / 湿淀粉 四钱 甜面酱 三钱 / 绍酒 一钱 白糖 三钱 / 味精 一分 食盐 二分 / 芝麻油 .钱 / 制法： / 1. 猪臀尖肉除净筋膜, 片一分厚大片, 顺肉纹切成细
@@ -135,7 +135,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["三、特点：", "（四）烂糊肉丝", "一、原料：", "二、制法：", "三、特点：", "（五）鱼香肉丝", "一、原料："]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0011.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0011.png
 - current_recipe_candidates: ["酱爆肉丝", "烂糊肉丝", "鱼香肉丝"]
 - current_fallback_candidates: []
 - content_preview: 丝，用蛋汁、盐、淀粉抓拿均匀。 / 2. 旺火坐勺添油半斤，烧七成热，下肉丝滑散，见色变白沥油。原炒勺留油半两，下面酱葱丝、烹绍酒，随即加入白糖，味精搅匀；再下肉丝翻炒，使汁裹肉丝，淋油二钱出勺即成。 / 三、特点： / 颜色深红，肉质脆嫩，味甜略咸，浓香可口。 / （四）烂糊肉丝 / 一、原料： / 主料：猪臀尖肉 二两 / 配料: 大白莱 一斤半 / 调料: 熟猪油 一两二 饺酒 六钱 / 湿淀粉 六钱 食盐 二钱 / 味精 二分 / 二、制法： / 1. 肉切二寸长的细丝, 白菜洗净切二寸半长的细丝。 / 2. 旺火坐勺放油六钱，烧七成热，下肉丝煸炒，肉色变白。烹入绍酒和肉清汤，烧开；放入白菜移微火上烧二十分钟，加入盐、味精，勾芡成糊状；淋油，推搅出勺即成。 / 三、特点： / 肉嫩菜烂，味醇清香，冬季饭菜。 / （五）鱼香肉丝 / 一、原料： / 主料：瘦猪肉 一两半
@@ -148,7 +148,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["二、制法：", "三、特点：", "（六）肉丝黄豆汤", "一、原料："]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0012.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0012.png
 - current_recipe_candidates: ["鱼香肉丝", "肉丝黄豆汤"]
 - current_fallback_candidates: []
 - content_preview: 配料：水玉兰片 二两 水木耳 三 钱 / 调料：葱 花 一钱半 姜米 半 钱 / 蒜 米 半 钱 泡辣椒 一钱半 / 豆瓣辣酱 三钱 白糖 二钱 / 酱油 一钱半 醋 二钱 / 绍酒 一钱 湿淀粉 一钱六 / 菜籽油 七钱 / 二、制法： / 1. 肉片薄, 顺丝切一寸长细丝, 放碗中加酱油 (三分)、绍酒 (二分)、湿淀粉 (六分) 抓匀。玉兰片切八分长细丝, 木耳切丝。 / 2. 酱油、醋、糖、绍酒、湿淀粉加肉汤一两，同放碗内对成调味汁。 / 3. 旺火坐勺添油半斤，烧六成热，下肉丝滑散，淹去余油；继下葱花、姜米、蒜米、豆瓣辣酱煸炒至肉上色，投入玉兰片、木耳稍炒，倾入调味汁子，翻炒，淋油，出勺即成。 / 三、特点： / 色红肉嫩，酸辣甜咸，醇香味美，别俱风味。注“鱼香肉片”除肉切片外制法同“鱼香肉丝”。 / （六）肉丝黄豆汤 / 一、原料： / 主料：猪臀尖肉 六钱 黄豆 二两半 / 配料：猪骨头 三斤 / 调料：酱 油 四钱 葱 米 二分
@@ -161,7 +161,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["（十四）炒三丝戴帽", "一、原料：", "二、制法：", "三、特点：", "(十五) 金银猪肝", "一、原料："]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0021.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0021.png
 - current_recipe_candidates: ["炒三丝戴帽", "金银猪肝"]
 - current_fallback_candidates: []
 - content_preview: （十四）炒三丝戴帽 / 一、原料： / 主料：生猪肉丝 三两 熟猪肚丝 四两 水玉兰片丝 四两 鸡蛋 五个 / 配料：葱丝一两 / 调料: 熟猪油 三两 酱油 一两食盐 五分 绍酒 二钱 / 二、制法： / 1. 旺火坐勺下油一两，投入葱丝、肉丝煸炒几下，待肉丝色变白；下肚丝、玉兰片丝，加入酱油、绍酒翻搅，淋熟猪油半两出勺盛盘。 / 2. 五个鸡蛋磕在碗内，加盐五分搅匀，起炒勺下油（一两半）烧热，溜入蛋糊摊成一个蛋饼，两面爆黄盖在三丝上即成。 / 三、特点： / 三丝脆嫩，口味鲜美，蛋饼戴帽，美观大方。 / (十五) 金银猪肝 / 一、原料： / 主料：生净猪肝 八两 鸡蛋 五个 / 配料：青笋（鲜嫩菜） 一两 湿淀粉 八钱 / 调料：熟猪油 二两半 食盐 一钱半 / 醋 八钱 绍 酒 二钱
@@ -174,7 +174,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["二、制法：", "三、特点：", "(十六) 炸五香脆肉", "一 原料:"]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0022.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0022.png
 - current_recipe_candidates: ["金银猪肝", "炸五香脆肉"]
 - current_fallback_candidates: []
 - content_preview: 味精 一分 胡椒粉 二分 / 葱 段 二钱 姜 丝 一钱 / 蒜 片 二钱 / 二、制法： / 1. 生猪肝切一寸长的薄片放在碗内，加湿淀粉五钱拿匀；青笋切小象眼片；葱切八分长破刀段；姜切细丝；蒜切薄片待用。 / 2. 五个鸡蛋分开清、黄磕入二个碗内用筷子搅成糊, 取两个汤盘抹上猪油, 把清、黄各倒在盘中, 上笼蒸约五分钟成蛋糕时 (不要蒸老) 取出, 切成小象眼片。另将盐、醋、味精、胡椒粉、绍酒, 清汤 (一两) 湿淀粉同置一碗中, 对成汁子待用。 / 3. 旺火坐勺添油二斤(实耗一两), 烧六成热下入猪肝,用手勺搅散滑开, 紧住血腥, 见色变白时倾漏勺沥去油, 勺中另加油半两, 投入葱、姜、蒜煸炒一下, 倒入猪肝、笋片、清、黄蛋糕片, 溜入对好的芡汁, 轻轻搅几下, 翻勺淋熟猪油八钱盛盘即成。 / 三、特点： / 红黄白色，悦目美观，鲜嫩味美，富于营养。 / (十六) 炸五香脆肉 / 一 原料: / 主料：熟肥膘猪肉 二两 / 配料：干淀粉六钱 面粉 三钱 / 鸡 蛋 半个
@@ -187,7 +187,7 @@
 - confidence: high
 - reasons: recipe boundary or structure needs manual verification
 - title_candidates: ["(二〇) 炸猪排", "一、原料：", "二、制法：", "三、特点："]
-- rendered_page_path: .\work\review_queue\rendered\sxcp-2\p0026.png
+- rendered_page_path: work/review_queue/rendered/sxcp-2/p0026.png
 - current_recipe_candidates: ["炸广东肉", "炸猪排"]
 - current_fallback_candidates: []
 - content_preview: 、弱点： / 颜色黄亮，外脆里嫩，椒麻油咸，宜于佐饼。 / (二〇) 炸猪排 / 一、原料： / 主料：猪排肉 三两 / 配料：鸡蛋 一两个 面包屑 一两半 / 面粉 半两 黄瓜 一两 / 蕃茄 一个 / 调料：食盐 二分 绍酒 二钱 / 味精 一分 白糖 二钱 / 花椒盐 二钱 葱、姜汁 二钱 / 菜籽油 一两 / 二、制法： / 1. 猪排肉片一分半厚的大片，用刀面一拍，再用刀背将肉两面捶松，刀根划断夹筋（以免炸时翘起或收缩）。葱姜汁 绍酒、食盐将肉片腌几分钟，放面粉里拖过，同时将鸡蛋盖入碗中打散，肉片放入再拖过，然后放面包屑里粘一层按平待炸。 / 2. 旺火坐勺添油一斤烧七成热，下肉片炸呈焦黄色，捞出沥油，改键条正齐装入条盘。 / 3. 蕨茄用滚水烫过, 去皮切片, 黄瓜去皮去籽, 切片;将其分别摆条盘两端, 上撒白糖, 走菜时另带花椒盐。 / 三、特点： / 西菜中吃，香酥脆嫩，别有风味，

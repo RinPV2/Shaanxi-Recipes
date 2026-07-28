@@ -25,8 +25,11 @@ work/*
 !work/page_review_md/
 !work/reports/
 work/reports/*
-!work/reports/ai_review_log.md
 !work/reports/user_confirmation_queue.md
+
+# 私有：AI 协作约定与过程日志,仅本地保留,不入公开仓库
+CLAUDE.md
+work/reports/ai_review_log.md
 
 # Large source PDFs should stay local
 陕西菜谱*.pdf

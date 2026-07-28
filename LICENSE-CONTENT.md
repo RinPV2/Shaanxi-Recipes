@@ -23,7 +23,7 @@ the **Creative Commons Attribution 4.0 International License (CC BY 4.0)**.
 
 使用整理内容时请注明来源,例如:
 
-> 《陕西菜谱》数字化项目 (https://github.com/RinPV2/Shanxi),CC BY 4.0
+> 《陕西菜谱》数字化项目 (https://github.com/RinPV2/Shaanxi-Recipes),CC BY 4.0
 
 ## 原书信息 / Source
 

@@ -20,7 +20,7 @@ python -m shanxi_pipeline.cli process-existing-json --root <repo-root>
 
 ## 网站
 
-**<https://rinpv2.github.io/Shanxi>** — 浏览全部 636 道菜、原书页图逐页对照、一键提交纠错。
+**<https://rinpv2.github.io/Shaanxi-Recipes>** — 浏览全部 636 道菜、原书页图逐页对照、一键提交纠错。
 
 站点由 `python -m shanxi_pipeline.cli build-site --root .` 从 vault 生成:纯静态 HTML/CSS/JS,无外部依赖与构建步骤,以仓库根为发布目录(页图 `assets/pages/` 原地复用)。
 

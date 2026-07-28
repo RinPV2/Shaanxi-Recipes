@@ -117713,7 +117713,7 @@
   "_version_name": "2.7.6",
   "_assembled_from_parts": [
     {
-      "path": ".\\MinerU_sxcp-1_part01_p0001-p0148__20260328162403.json",
+      "path": "MinerU_sxcp-1_part01_p0001-p0148__20260328162403.json",
       "original_page_count": 148,
       "rebased_range": [
         1,
@@ -117721,7 +117721,7 @@
       ]
     },
     {
-      "path": ".\\MinerU_sxcp-1_part02_p0149-p0213__20260328155651.json",
+      "path": "MinerU_sxcp-1_part02_p0149-p0213__20260328155651.json",
       "original_page_count": 65,
       "rebased_range": [
         149,

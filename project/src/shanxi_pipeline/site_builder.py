@@ -16,8 +16,8 @@ import yaml
 
 LOGGER = logging.getLogger(__name__)
 
-REPO_URL = "https://github.com/RinPV2/Shanxi"
-SITE_BASE = "https://rinpv2.github.io/Shanxi"
+REPO_URL = "https://github.com/RinPV2/Shaanxi-Recipes"
+SITE_BASE = "https://rinpv2.github.io/Shaanxi-Recipes"
 SITE_TITLE = "陕西菜谱"
 SITE_SUBTITLE = "1970 年代《陕西菜谱》全四册数字化"
 FULL_PAGE_PREFIX = "【整页】"
