@@ -375,6 +375,10 @@ def build_site(root: Path) -> dict[str, Any]:
     site_dir.mkdir(exist_ok=True)
     recipes_dir.mkdir(exist_ok=True)
 
+    # 菜名变化会改变文件名，旧 HTML 若不清理会留在 recipes/ 里继续被发布。
+    # 先记下本次应当产出的文件名，收尾时删除多余者。
+    expected_pages = {f"{recipe['slug']}.html" for recipe in recipes}
+
     entries: list[dict[str, Any]] = []
     categories: set[str] = set()
     for recipe in recipes:
@@ -421,8 +425,17 @@ def build_site(root: Path) -> dict[str, Any]:
     )
     (root / ".nojekyll").write_text("", encoding="utf-8")
 
+    # 清理陈旧页面：菜名修正后旧文件名的 HTML 不再对应任何 vault 笔记
+    pruned = 0
+    for stale in recipes_dir.glob("*.html"):
+        if stale.name not in expected_pages:
+            LOGGER.info("删除陈旧页面: %s", stale.name)
+            stale.unlink()
+            pruned += 1
+
     stats = {
         "recipes": len(recipes),
+        "pruned": pruned,
         "categories": len(ordered_categories),
         "uncategorized": sum(1 for e in entries if e["c"] == UNCATEGORIZED),
     }

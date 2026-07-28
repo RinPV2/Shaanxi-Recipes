@@ -61,19 +61,48 @@ def _append_to_active(active: ActiveRecipe, page: NormalizedPage, blocks: list[d
     )
 
 
-def _split_ingredient_line(text: str) -> tuple[list[str], list[str]]:
+# 原书用量：数字串 + 单位（+「半」）。与 obsidian_exporter 中的口径保持一致。
+_ING_NUM = "〇零一二三四五六七八九十百半两几"
+_ING_UNIT = "钱两斤分个只片粒条张朵克根块付副枚棵把碗匙勺撮"
+_ING_PAIR = re.compile(rf"([一-鿿、（）()]+?)([{_ING_NUM}]+[{_ING_UNIT}]半?)")
+_ING_LABEL = re.compile(r"^(主料|配料|调料|佐料|辅料|原料|用料)\s*[:：]?\s*")
+
+
+def _clean_ing_name(name: str) -> str:
+    """去掉原书为对齐插入的空格：「蛋 清」→「蛋清」、「葱 花」→「葱花」。"""
+    return re.sub(r"\s+", "", name).strip("、 ")
+
+
+def _split_ingredient_line(text: str, current_group: str) -> tuple[list[str], str]:
+    """把一行原料拆成若干「名称 用量」条目，并返回该行所属分组。
+
+    关键点：**没有标签的续行继承上一行的分组**。原书里「调料：」下面往往还有
+    两三行继续列调料（葱花/姜米/味精…），旧实现逐行独立判断，把这些续行一律
+    归到 ingredients，导致调料被错分到食材。
+    """
     normalized = normalize_text(text).strip("：: ")
-    ingredients: list[str] = []
-    seasonings: list[str] = []
     if not normalized:
-        return ingredients, seasonings
-    if any(normalized.startswith(label) for label in SEASONING_LABELS):
-        seasonings.append(normalized)
-    elif any(normalized.startswith(label) for label in INGREDIENT_LABELS):
-        ingredients.append(normalized)
-    else:
-        ingredients.append(normalized)
-    return ingredients, seasonings
+        return [], current_group
+
+    label_match = _ING_LABEL.match(normalized)
+    group = current_group
+    label = ""
+    if label_match:
+        label = label_match.group(1)
+        group = "seasoning" if label in SEASONING_LABELS else "ingredient"
+        normalized = normalized[label_match.end():]
+
+    body = re.sub(r"\s+", "", normalized)
+    items = [
+        f"{_clean_ing_name(m.group(1))} {m.group(2)}"
+        for m in _ING_PAIR.finditer(body)
+        if _clean_ing_name(m.group(1))
+    ]
+    if not items and normalized.strip():
+        items = [normalized.strip()]          # 拆不出用量时整行保留，不丢信息
+    if label and items:
+        items[0] = f"{label}：{items[0]}"     # 组标签只出现在该组首条，与原书排版一致
+    return items, group
 
 
 def _match_section_header(text: str) -> tuple[str | None, str]:
@@ -97,6 +126,7 @@ def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[Review
     review_items: list[ReviewItem] = []
 
     current_section = "other"
+    ingredient_group = "ingredient"   # 原料区内的当前分组，供无标签续行继承
     for block in active.blocks:
         text = normalize_text(block.get("text", ""))
         if not text:
@@ -111,9 +141,8 @@ def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[Review
             text = remainder
 
         if current_section == "ingredients":
-            ing, sea = _split_ingredient_line(text)
-            ingredients.extend(ing)
-            seasonings.extend(sea)
+            items, ingredient_group = _split_ingredient_line(text, ingredient_group)
+            (seasonings if ingredient_group == "seasoning" else ingredients).extend(items)
         elif current_section == "seasonings":
             seasonings.append(text)
         elif current_section == "steps":
