@@ -9,11 +9,13 @@ from typing import Any
 
 from .confirmation_reader import parse_confirmation_source
 from .manifest import load_books
-from .utils import normalize_text, write_json, write_text
+from .utils import is_plausible_dish_title, normalize_text, write_json, write_text
 
 PAGE_REF_RE = re.compile(r"[（(]\s*(?P<page>\d+)\s*[.)）]")
 TOC_ENTRY_RE = re.compile(r"^(?P<title>.+?)\s*(?:[.…·]+|\.+)\s*[（(]\s*(?P<page>\d+)\s*[.)）]\s*$")
 RECIPE_ENUMERATOR_RE = re.compile(r"^[（(]?[一二三四五六七八九十百千零〇\d]+[)）]?\s*")
+# 菜名编号必须带闭括号:「（三八）松籽酿方肉」是菜名,「2.炒勺坐火上…」是步骤
+DISH_ENUMERATOR_RE = re.compile(r"^[（(]?[一二三四五六七八九十百千零〇\d]+[)）]\s*")
 
 
 def _canonical_text(text: str) -> str:
@@ -82,21 +84,16 @@ def _extract_page_title_override(correct_content: str) -> str:
         return ""
     if len(first) > 30:
         return ""
-    if not RECIPE_ENUMERATOR_RE.match(first):
+    # 必须是「（数字）菜名」这种带闭括号的菜名编号。原先闭括号可选,
+    # 于是续页首行的编号步骤（「2.取蒸碗两个,…」）和原料续行（「八角 一钱半 …」）
+    # 都能匹配,首字被当成序号剥掉,剩下的正文冒充菜名。
+    if not DISH_ENUMERATOR_RE.match(first):
         return ""
 
-    for token in tokens[:1]:
-        if "原料" in token or "制法" in token or "特点" in token or "目录" == token or token.endswith("类"):
-            continue
-        if ":" in token or "：" in token:
-            continue
-        if len(token) > 30:
-            continue
-        if not RECIPE_ENUMERATOR_RE.match(token):
-            continue
-        title = _canonical_title(token)
-        if title:
-            return title
+    title = _canonical_title(first)
+    # 剥掉序号后还要像菜名（长度/句读/用量串/括号成对),否则宁可不给 override
+    if title and is_plausible_dish_title(title):
+        return title
     return ""
 
 

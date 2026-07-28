@@ -29,7 +29,7 @@ from .reports import (
     write_validation_checklist,
 )
 from .review_web import serve_review_web
-from .utils import ensure_dir, setup_logging, write_json, write_text
+from .utils import ensure_dir, is_plausible_dish_title, setup_logging, write_json, write_text
 
 
 def _select_books(all_books, requested_ids):
@@ -98,6 +98,22 @@ def _apply_title_overrides(
         if not override or override == recipe.title:
             continue
         if start_counts[(recipe.book_id, start_page)] != 1:
+            continue
+        # override 由校对记录首行推断（review_priority._extract_page_title_override）。
+        # 续页首行往往是编号步骤或原料续行，推断出的"菜名"就是一段正文，
+        # 顶掉分段器的正确菜名后会直接成为站点标题与 URL。不像菜名就不采用。
+        if not is_plausible_dish_title(override):
+            correction_log.append(
+                {
+                    "book_id": recipe.book_id,
+                    "local_page": start_page,
+                    "mode": "title_override_rejected",
+                    "patched": 0,
+                    "unmatched": [],
+                    "old_title": recipe.title,
+                    "new_title": override,
+                }
+            )
             continue
         correction_log.append(
             {

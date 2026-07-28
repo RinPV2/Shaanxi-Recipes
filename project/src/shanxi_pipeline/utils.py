@@ -92,6 +92,36 @@ def strip_recipe_enumerator(title: str) -> str:
     return cleaned.strip("：: ")
 
 
+# 菜名合法性校验。菜名会直接成为 vault 笔记名、站点标题和 URL，一旦把一段正文
+# 当成菜名，缺陷就直接暴露给读者。全书 630 道菜实测：最长菜名 12 字
+# （「螺旋油饼（原名金钱油饼）」），最短 2 字，无一含句读，无一含「数字+钱/两/斤/克」
+# 的用量串，括号一律成对。据此设阈值，宁可放弃一个可疑候选也不让正文冒充菜名。
+MAX_DISH_TITLE_LEN = 14
+_TITLE_PUNCT = re.compile(r"[。．，,；;：:！!？?…“”\"']")
+_TITLE_QTY = re.compile(r"[〇零一二三四五六七八九十百半]+[钱两斤克]")
+# 「一、原料」「二、制法」这类章节头，以及分类页的「…类」，都不是菜名
+_TITLE_SECTION_WORD = ("原料", "用料", "材料", "主料", "配料", "调料", "佐料", "辅料",
+                       "制法", "作法", "做法", "方法", "制作", "特点", "说明", "附注", "目录")
+
+
+def is_plausible_dish_title(title: str) -> bool:
+    """判断一个候选串是否像菜名（而不是正文/原料行/编号步骤）。"""
+    cleaned = strip_recipe_enumerator(title)
+    if not cleaned or "\n" in cleaned:
+        return False
+    if not 2 <= len(cleaned) <= MAX_DISH_TITLE_LEN:
+        return False
+    if _TITLE_PUNCT.search(cleaned):
+        return False
+    if _TITLE_QTY.search(cleaned):
+        return False
+    if cleaned.count("(") + cleaned.count("（") != cleaned.count(")") + cleaned.count("）"):
+        return False
+    if cleaned.endswith("类") or any(word in cleaned for word in _TITLE_SECTION_WORD):
+        return False
+    return True
+
+
 def setup_logging(log_dir: Path, log_name: str = "pipeline") -> logging.Logger:
     ensure_dir(log_dir)
     logger = logging.getLogger("shanxi_pipeline")
