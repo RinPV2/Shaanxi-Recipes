@@ -30,13 +30,30 @@ class ActiveRecipe:
     warnings: list[str] = field(default_factory=list)
 
 
+# 书4 部分菜用「（一）用料：」「（二）作法：」而非「一、用料：」编排章节，
+# 与菜名的「（数字）菜名」同形。旧实现把这些章节头也判成菜名，
+# 于是一道菜被撕成「桂花桶鸭(空)」+「用料」+「作法」多条记录。
+_SECTION_WORDS = (
+    "用料", "原料", "材料", "配料", "主料", "调料",
+    "作法", "制法", "做法", "方法", "制作",
+    "特点", "说明", "附注", "注意", "备注",
+)
+
+
 def is_recipe_title(text: str) -> bool:
     cleaned = normalize_text(text).strip("：: ")
     if not cleaned:
         return False
     if cleaned.endswith("类") or "目录" in cleaned or cleaned == "陕西菜谱":
         return False
-    return bool(re.match(r"^[（(]?[一二三四五六七八九十百零〇0-9]+[）)]\s*.+", cleaned))
+    match = re.match(r"^[（(]?[一二三四五六七八九十百零〇0-9]+[）)]\s*(.+)", cleaned)
+    if not match:
+        return False
+    # 序号后接章节名 → 是章节头，不是菜名
+    remainder = match.group(1).strip("：: ")
+    if remainder.startswith(_SECTION_WORDS):
+        return False
+    return True
 
 
 def find_recipe_title_positions(blocks: list[dict[str, Any]]) -> list[int]:
