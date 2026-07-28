@@ -12,10 +12,30 @@ from .manifest import load_books
 from .utils import is_plausible_dish_title, normalize_text, write_json, write_text
 
 PAGE_REF_RE = re.compile(r"[（(]\s*(?P<page>\d+)\s*[.)）]")
-TOC_ENTRY_RE = re.compile(r"^(?P<title>.+?)\s*(?:[.…·]+|\.+)\s*[（(]\s*(?P<page>\d+)\s*[.)）]\s*$")
-RECIPE_ENUMERATOR_RE = re.compile(r"^[（(]?[一二三四五六七八九十百千零〇\d]+[)）]?\s*")
+# 目录条目 =「菜名 + 可选点线 + （页码）」。点线不能强求:书4 的双栏目录只用空格
+# 分隔（「白封肉 (1)」),书2 也有若干条漏了点线（「炒肝油 (50)」「汆三丁(52)」),
+# 强求点线会把整页 36 条目录条目一起丢掉。页码闭括号允许「(1.)」这类多余句点。
+TOC_ENTRY_RE = re.compile(r"^(?P<title>.+?)\s*[.…·]*\s*[（(]\s*(?P<page>\d+)\s*[.)）]+\s*$")
+# 目录条目的编号形态各册不同:书1「41.红烧肘子」、书3「（五九）三原疙瘩面」,
+# 而书2/书4 的目录条目根本不编号。菜名本身可以以汉字数字开头（「五香鱼」「三不粘」
+# 「四季豆腐」「五柳凤尾笋」),所以汉字数字只有带括号或紧跟顿号/句点时才算编号,
+# 否则会把菜名第一个字当序号剥掉。阿拉伯数字开头的菜名不存在,可宽松处理。
+TOC_ENUMERATOR_RE = re.compile(
+    r"^(?:[（(]\s*[一二三四五六七八九十百千零〇\d]+\s*[)）]"
+    r"|[一二三四五六七八九十百千零〇]+\s*[、.]"
+    r"|\d+\s*[、.]?)\s*"
+)
 # 菜名编号必须带闭括号:「（三八）松籽酿方肉」是菜名,「2.炒勺坐火上…」是步骤
 DISH_ENUMERATOR_RE = re.compile(r"^[（(]?[一二三四五六七八九十百千零〇\d]+[)）]\s*")
+# 人工校对记录的控制标记（定义见 correction_applier）。它们是给回灌器看的指令前缀,
+# 不是页面内容:漏剥就会出现「【整页】41.红烧肘子」这种菜名和「【整页】水产类」这种分类。
+REVIEW_MARKER_RE = re.compile(r"【(?:整页|补行|补行前|替行|删行)(?::[^】]*)?】\s*")
+# 菜名里的括号批注（「箸头面（油泼面）」「炒拨鱼（附，拨鱼方法）」)不参与菜名合法性判断,
+# 否则会连正经菜名一起否掉。
+TOC_ANNOTATION_RE = re.compile(r"[（(][^（()）]*[)）]")
+TITLE_TRIM_CHARS = ".-· "
+# 已编译的 text_replacements:(pattern, replacement) 序列
+Replacements = tuple[tuple[re.Pattern[str], str], ...]
 
 
 def _canonical_text(text: str) -> str:
@@ -24,16 +44,53 @@ def _canonical_text(text: str) -> str:
     return normalized.strip()
 
 
-def _canonical_title(text: str) -> str:
+def _strip_review_markers(text: str) -> str:
+    """剥掉校对记录的控制标记前缀（【整页】/【补行】/【补行前:锚】/【替行:锚】/【删行】）。
+
+    在按「/」切分之前整串剥除:个别【替行:…】的锚文本里含「/」,先切分会把标记切断。
+    """
+    return REVIEW_MARKER_RE.sub("", text)
+
+
+def compile_text_replacements(
+    cleaning_rules: dict[str, Any] | None,
+) -> tuple[tuple[re.Pattern[str], str], ...]:
+    """把 cleaning_rules.yaml 的 text_replacements 编译成 (pattern, replacement) 序列。"""
+    rules = (cleaning_rules or {}).get("text_replacements") or []
+    return tuple((re.compile(rule["pattern"]), rule["replacement"]) for rule in rules)
+
+
+def apply_text_replacements(text: str, replacements: Replacements) -> str:
+    for pattern, replacement in replacements:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _canonical_title(text: str, replacements: Replacements = ()) -> str:
     normalized = _canonical_text(text)
-    normalized = RECIPE_ENUMERATOR_RE.sub("", normalized)
+    normalized = TOC_ENUMERATOR_RE.sub("", normalized)
     normalized = re.sub(r"[·.…]+$", "", normalized)
     normalized = normalized.replace(" ", "")
-    return normalized.strip("()（）.- ")
+    # 锚点图是可再生的派生产物,职责是与 vault 标题交叉核对,两侧必须落在同一归一化
+    # 空间:否则每个已被 text_replacements 规范化的字（氽→汆、山查糕→山楂糕)都会变成
+    # 一条假缺口。忠实原书的留痕由 work/page_review_md 的校对记录承担,不在这里。
+    normalized = apply_text_replacements(normalized, replacements)
+    normalized = normalized.strip(TITLE_TRIM_CHARS)
+    # 括号成对时不能剥。原先无条件 strip("()（）") 把「箸头面(油泼面)」削成
+    # 「箸头面(油泼面」,只有落单的括号才是解析残留。
+    if normalized.count("(") + normalized.count("（") != normalized.count(")") + normalized.count("）"):
+        normalized = normalized.strip("()（）")
+    return normalized.strip(TITLE_TRIM_CHARS)
+
+
+def _is_toc_dish_title(title: str) -> bool:
+    """目录条目解析结果的合法性校验:剥掉括号批注后必须像菜名。"""
+    core = TOC_ANNOTATION_RE.sub("", title).strip(TITLE_TRIM_CHARS) or title
+    return is_plausible_dish_title(core)
 
 
 def _split_correct_content(text: str) -> list[str]:
-    normalized = _canonical_text(text)
+    normalized = _strip_review_markers(_canonical_text(text))
     if not normalized:
         return []
     prepared = normalized.replace(" / ", "\n").replace("/", "\n")
@@ -41,24 +98,44 @@ def _split_correct_content(text: str) -> list[str]:
     return tokens
 
 
-def _extract_toc_entries(correct_content: str) -> list[dict[str, Any]]:
+def _extract_toc_entries(
+    correct_content: str,
+    rejected: list[str] | None = None,
+    replacements: Replacements = (),
+    category_state: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """解析一页目录。
+
+    `category_state` 是**按册**的分类上下文（形如 `{"category": "水产类"}`）:分类标题
+    在原书里只印一次,后面的目录续页直接接着排菜名。不跨页续传的话,每张续页开头到
+    下一个「…类」之间的条目就全部丢分类。调用方按册传同一个 dict 即可。
+    """
     tokens = _split_correct_content(correct_content)
     if sum(1 for token in tokens if PAGE_REF_RE.search(token)) < 3:
+        # 不是目录页:提前退出,不能污染分类上下文
         return []
 
-    category = ""
+    category = (category_state or {}).get("category", "")
     entries: list[dict[str, Any]] = []
     for token in tokens:
         if token == "目录":
             continue
         if token.endswith("类"):
             category = token
+            if category_state is not None:
+                category_state["category"] = category
             continue
         matched = TOC_ENTRY_RE.match(token)
         if not matched:
             continue
-        title = _canonical_title(matched.group("title"))
+        title = _canonical_title(matched.group("title"), replacements)
         if not title:
+            continue
+        # 目录里也排着附录条目（「附:酱卤菜的特点及制作方法」「二、汤汁的配制及保养方法」),
+        # 它们不是菜名锚点,放进映射只会在与正文菜名交叉核对时冒充缺口。
+        if not _is_toc_dish_title(title):
+            if rejected is not None:
+                rejected.append(title)
             continue
         entries.append(
             {
@@ -133,11 +210,98 @@ def _load_recipe_page_map(context, requested_ids: list[str] | None) -> dict[tupl
                 recipe_map[(row["book_id"], int(local_page))].append(
                     {
                         "title": row.get("title", ""),
+                        "aliases": list(row.get("aliases") or []),
                         "confidence": row.get("confidence", ""),
                         "status": row.get("status", ""),
                     }
                 )
     return recipe_map
+
+
+def _fold_title(title: str) -> str:
+    """比对用的宽松键:去掉括号批注、分隔符与全半角差异。"""
+    folded = TOC_ANNOTATION_RE.sub("", unicodedata.normalize("NFKC", title))
+    return re.sub(r"[、—\-·,，/\s]", "", folded)
+
+
+def _build_recipe_title_index(
+    recipe_map: dict[tuple[str, int], list[dict[str, Any]]],
+) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
+    """每册「菜名 → 正文起始本地页」。同名取最小页（= local_pages[0]）。"""
+    exact: dict[str, dict[str, int]] = defaultdict(dict)
+    folded: dict[str, dict[str, int]] = defaultdict(dict)
+    for (book_id, local_page), rows in recipe_map.items():
+        for row in rows:
+            for name in [row.get("title", ""), *(row.get("aliases") or [])]:
+                name = (name or "").strip()
+                if not name:
+                    continue
+                for index, key in ((exact, name), (folded, _fold_title(name))):
+                    if not key:
+                        continue
+                    known = index[book_id].get(key)
+                    if known is None or local_page < known:
+                        index[book_id][key] = local_page
+    return exact, folded
+
+
+def _resolve_toc_local_pages(
+    toc_map: dict[str, dict[int, list[dict[str, Any]]]],
+    recipe_map: dict[tuple[str, int], list[dict[str, Any]]],
+) -> tuple[dict[str, dict[int, list[dict[str, Any]]]], dict[str, int]]:
+    """把锚点的**印刷**页码换成正文**本地**页。
+
+    目录里印的是原书页码,与 PDF 本地页相差 7–13 页且册内不固定（插图页导致),照印刷
+    页码去查分类会把分类边界整体放早,实测 327 道可判定菜里错 82 道（25.1%）。这里不建
+    偏移映射表（偏移不固定,表本身就是新的错误来源),而是用已有的精确匹配定位:菜名能与
+    正文对上的直接取该菜的起始本地页;对不上的按册内目录顺序在已定位锚点之间单调插值。
+    原印刷页码保留在 `printed_page` 里备查。
+    """
+    exact_index, folded_index = _build_recipe_title_index(recipe_map)
+    stats: Counter = Counter()
+    resolved: dict[str, dict[int, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+
+    for book_id, page_map in toc_map.items():
+        # 目录顺序 = 印刷页码顺序
+        flat = [(printed, entry) for printed, entries in sorted(page_map.items()) for entry in entries]
+        located: list[int | None] = []
+        for _printed, entry in flat:
+            local = exact_index[book_id].get(entry["title"])
+            source = "matched"
+            if local is None:
+                local = folded_index[book_id].get(_fold_title(entry["title"]))
+                source = "matched_folded" if local is not None else "interpolated"
+            located.append(local)
+            entry["page_source"] = source
+
+        for position, (printed, _entry) in enumerate(flat):
+            if located[position] is not None:
+                continue
+            previous = next(
+                ((located[i], flat[i][0]) for i in range(position - 1, -1, -1) if located[i] is not None),
+                None,
+            )
+            following = next(
+                ((located[i], flat[i][0]) for i in range(position + 1, len(flat)) if located[i] is not None),
+                None,
+            )
+            if previous is not None:
+                guess = previous[0] + (printed - previous[1])
+                if following is not None:
+                    guess = max(previous[0], min(guess, following[0]))
+            elif following is not None:
+                guess = max(1, following[0] - (following[1] - printed))
+            else:
+                guess = printed
+            located[position] = guess
+
+        for (printed, entry), local in zip(flat, located):
+            entry["printed_page"] = printed
+            entry["local_page"] = int(local)
+            resolved[book_id][int(local)].append(entry)
+            stats[entry["page_source"]] += 1
+
+    return resolved, dict(stats)
 
 
 def _load_confirmations(context) -> dict[tuple[str, int], dict[str, Any]]:
@@ -148,6 +312,7 @@ def _load_confirmations(context) -> dict[tuple[str, int], dict[str, Any]]:
 def _build_confirmation_maps(
     confirmations: dict[tuple[str, int], dict[str, Any]],
     page_lookup: dict[tuple[str, int], dict[str, Any]],
+    replacements: Replacements = (),
 ) -> tuple[dict[str, dict[int, list[dict[str, Any]]]], dict[str, dict[int, str]], dict[str, Any]]:
     toc_map: dict[str, dict[int, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     title_overrides: dict[str, dict[int, str]] = defaultdict(dict)
@@ -156,10 +321,15 @@ def _build_confirmation_maps(
         "confirmed_pages": 0,
         "confirmed_toc_pages": 0,
         "toc_entries": 0,
+        "toc_entries_rejected": 0,
+        "toc_rejected_samples": [],
         "title_overrides": 0,
     }
 
-    for key, row in confirmations.items():
+    # 分类上下文按册续传,因此必须按 (册, 页) 顺序遍历
+    category_states: dict[str, dict[str, str]] = defaultdict(dict)
+
+    for key, row in sorted(confirmations.items()):
         if not row.get("confirmed"):
             continue
         stats["confirmed_pages"] += 1
@@ -167,7 +337,15 @@ def _build_confirmation_maps(
         if not correct_content:
             continue
 
-        toc_entries = _extract_toc_entries(correct_content)
+        rejected: list[str] = []
+        toc_entries = _extract_toc_entries(
+            correct_content, rejected, replacements, category_states[row["book_id"]]
+        )
+        if rejected:
+            stats["toc_entries_rejected"] += len(rejected)
+            stats["toc_rejected_samples"].extend(
+                f"{row['book_id']} p{int(row['local_page']):04d}: {title}" for title in rejected
+            )
         if toc_entries:
             stats["confirmed_toc_pages"] += 1
             stats["toc_entries"] += len(toc_entries)
@@ -289,7 +467,16 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
     pages, page_lookup = _load_pages(context, requested_ids)
     recipe_map = _load_recipe_page_map(context, requested_ids)
     confirmation_map = _load_confirmations(context)
-    toc_map, title_override_map, confirmation_stats = _build_confirmation_maps(confirmation_map, page_lookup)
+    replacements = compile_text_replacements(getattr(context, "cleaning_rules", None))
+    toc_map, title_override_map, confirmation_stats = _build_confirmation_maps(
+        confirmation_map, page_lookup, replacements
+    )
+    toc_map, page_resolution_stats = _resolve_toc_local_pages(toc_map, recipe_map)
+    confirmation_stats["toc_page_resolution"] = page_resolution_stats
+    confirmation_stats["toc_entries_without_category"] = sum(
+        1 for page_map in toc_map.values() for entries in page_map.values() for entry in entries
+        if not entry.get("category")
+    )
 
     bucketed: dict[str, list[dict[str, Any]]] = {
         "must_review": [],
@@ -332,6 +519,10 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
             "confirmed_pages_used": confirmation_stats["confirmed_pages"],
             "confirmed_toc_pages": confirmation_stats["confirmed_toc_pages"],
             "toc_entries_extracted": confirmation_stats["toc_entries"],
+            "toc_entries_rejected": confirmation_stats["toc_entries_rejected"],
+            "toc_rejected_samples": confirmation_stats["toc_rejected_samples"],
+            "toc_page_resolution": confirmation_stats["toc_page_resolution"],
+            "toc_entries_without_category": confirmation_stats["toc_entries_without_category"],
             "title_overrides": confirmation_stats["title_overrides"],
             "multi_anchor_pages": len(multi_anchor_pages),
         },
@@ -378,6 +569,9 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
         f"- 已读取确认页: {report['summary']['confirmed_pages_used']}",
         f"- 已确认目录页: {report['summary']['confirmed_toc_pages']}",
         f"- 已提取目录锚点: {report['summary']['toc_entries_extracted']}",
+        f"- 目录条目判为非菜名而剔除: {report['summary']['toc_entries_rejected']}",
+        f"- 锚点页码定位: {report['summary']['toc_page_resolution']}（印刷页→本地页）",
+        f"- 锚点缺分类: {report['summary']['toc_entries_without_category']}",
         f"- 已提取单页标题修正: {report['summary']['title_overrides']}",
         f"- 已识别多菜谱锚点页: {report['summary']['multi_anchor_pages']}",
         "",

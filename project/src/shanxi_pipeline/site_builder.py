@@ -59,7 +59,10 @@ def build_category_lookup(anchor_map: dict[str, Any]) -> dict[str, list[tuple[in
         points: dict[int, str] = {}
         for entries in pages.values():
             for entry in entries:
-                category = (entry.get("category") or "").replace(FULL_PAGE_PREFIX, "").strip()
+                # 曾在此 replace 掉 FULL_PAGE_PREFIX 作为创可贴；控制标记已在
+                # review_priority 源头剥除（_strip_review_markers），此处不再兜底，
+                # 以免掩盖同类回归。
+                category = (entry.get("category") or "").strip()
                 page = entry.get("local_page")
                 if category and isinstance(page, int):
                     # 同页多条目时保留首次出现的分类

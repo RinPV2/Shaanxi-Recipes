@@ -19,7 +19,11 @@ from .page_review_builder import build_page_review_dataset
 from .pdf_reviewer import render_book_pages, render_review_pages
 from .pdf_splitter import split_books
 from .recipe_segmenter import segment_book
-from .review_priority import build_review_priority_report
+from .review_priority import (
+    apply_text_replacements,
+    build_review_priority_report,
+    compile_text_replacements,
+)
 from .reports import (
     write_directory_tree,
     write_ingestion_manifest,
@@ -84,6 +88,7 @@ def _apply_title_overrides(
     recipes: list[RecipeCandidate],
     title_overrides: dict[str, dict[int, str]],
     correction_log: list[dict],
+    replacements: tuple = (),
 ) -> None:
     start_counts: dict[tuple[str, int], int] = defaultdict(int)
     for recipe in recipes:
@@ -95,6 +100,9 @@ def _apply_title_overrides(
             continue
         start_page = recipe.local_pages[0]
         override = title_overrides.get(recipe.book_id, {}).get(start_page, "")
+        # 进入成品库的标题是派生产物,和页面文本走同一套 text_replacements;
+        # 校对记录里的原样写法留在 title_override_map.json 里备查。
+        override = apply_text_replacements(override, replacements)
         if not override or override == recipe.title:
             continue
         if start_counts[(recipe.book_id, start_page)] != 1:
@@ -169,6 +177,7 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
 
     corrections = load_page_corrections(context.work_root)
     title_overrides = _load_title_overrides(context.work_root / "reports" / "title_override_map.json")
+    replacements = compile_text_replacements(context.cleaning_rules)
     correction_log: list[dict] = []
 
     all_reviews = _load_existing_review_queue(context.work_root / "reports" / "review_queue.jsonl", {book.book_id for book in books})
@@ -193,7 +202,7 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
             write_json(normalized_root / f"page-{page.local_page:04d}.json", normalized.to_dict())
 
         recipes, fallbacks, review_items = segment_book(book, normalized_pages)
-        _apply_title_overrides(recipes, title_overrides, correction_log)
+        _apply_title_overrides(recipes, title_overrides, correction_log, replacements)
         write_json(context.work_root / "recipe_candidates" / f"{book.book_id}.json", [recipe.to_dict() for recipe in recipes])
 
         for fallback in fallbacks:
