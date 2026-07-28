@@ -105,15 +105,22 @@ def _split_ingredient_line(text: str, current_group: str) -> tuple[list[str], st
     return items, group
 
 
+# 章节序号前缀：原书排版不一，「一、原料」「一 原料」「一，原料」「一.原料」都出现过。
+# 旧实现只按字面 startswith 匹配，凡分隔符不是「、」的都漏识，整行被当成食材条目留下。
+_SECTION_ENUM = re.compile(r"^[一二三四五六七八九十]\s*[、，,．.。:：]?\s*")
+
+
 def _match_section_header(text: str) -> tuple[str | None, str]:
     normalized = normalize_text(text)
-    for section, headers in SECTION_HEADERS.items():
-        for header in headers:
-            if normalized.startswith(header):
-                remainder = normalized[len(header) :].lstrip("：:；; ")
-                if remainder and remainder != normalized:
-                    return section, remainder
-                return section, ""
+    candidates = [normalized]
+    stripped = _SECTION_ENUM.sub("", normalized, count=1)
+    if stripped and stripped != normalized:
+        candidates.append(stripped)
+    for candidate in candidates:
+        for section, headers in SECTION_HEADERS.items():
+            for header in headers:
+                if candidate.startswith(header):
+                    return section, candidate[len(header) :].lstrip("：:；; ")
     return None, normalized
 
 
