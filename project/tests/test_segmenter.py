@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from shanxi_pipeline.models import BookEntry, NormalizedPage
 from shanxi_pipeline.recipe_segmenter import (
+    _repair_split_columns,
     _split_ingredient_line,
     is_recipe_title,
     segment_book,
@@ -270,3 +271,103 @@ class DuplicateIngredientTests(unittest.TestCase):
         self.assertEqual(len(recipes), 1)
         self.assertEqual(recipes[0].ingredients.count("葱 二斤"), 2)
         self.assertEqual(recipes[0].ingredients[0], "面粉 二斤五两")
+
+
+class AbbreviatedQuantityTests(unittest.TestCase):
+    """原书把「一钱二分」省写成「一钱二」（书1 p94「盐 一钱二」、书2 p57「菜籽油 一两二」、
+    书2 p66「米醋 一两六」、书3 p34「食盐 二钱五」，页图 8 倍放大已核）。
+
+    旧实现一次只吃「数字串+单位」，末尾光秃秃的数字被丢掉，用量被截成「一钱」——
+    那是把分量写小了，比不写更糟。
+    """
+
+    def _items(self, line: str) -> list[str]:
+        entries, _group = _split_ingredient_line(line, "ingredient")
+        return [item for _group_name, item in entries]
+
+    def test_trailing_bare_numeral_stays_in_the_quantity(self) -> None:
+        self.assertEqual(self._items("味精 二分 熟猪油 一两二"), ["味精 二分", "熟猪油 一两二"])
+        self.assertEqual(self._items("绍酒 三钱 食盐 二钱五"), ["绍酒 三钱", "食盐 二钱五"])
+        self.assertEqual(self._items("葱花 一钱 盐 一钱二"), ["葱花 一钱", "盐 一钱二"])
+
+    def test_bare_numeral_is_only_absorbed_at_the_end_of_the_line(self) -> None:
+        # 不锚在行尾，「二钱」后面的「三鲜汤」会被啃掉首字，用量变成「二钱三」
+        self.assertEqual(
+            self._items("酱油 二钱 三鲜汤 半斤"),
+            ["酱油 二钱", "三鲜汤 半斤"],
+        )
+        self.assertEqual(
+            self._items("小茴香 一斤八两 八角 四两"),
+            ["小茴香 一斤八两", "八角 四两"],
+        )
+
+
+class SplitColumnRepairTests(unittest.TestCase):
+    """原书原料表是「名称 用量 名称 用量」两栏网格，MinerU 遇到宽栏间距会按栏切块，
+    右栏的名称与用量各自成块 → 成品库里一串裸食材名 + 一串孤立分量
+    （书1 p92 烧牛蹄筋、书2 p137 烧猴头、书4 p90 辣汁茄皮，页图 6 倍放大已核）。
+
+    复原只认 bbox：同一印刷行内按 x 从左到右，把「光秃秃的用量」接到左边
+    「没有用量的名称」后面。定不了归属的一律不配。
+    """
+
+    def _blocks(self, rows: list[list[tuple[str, int, int]]]) -> list[dict]:
+        """rows = [[(文本, x0, x1), ...], ...]，每个 row 是一印刷行（y 自动排）。"""
+        blocks = [{"block_type": "title", "text": "一、原料：", "bbox": [80, 60, 160, 78]}]
+        for row_index, row in enumerate(rows):
+            top = 100 + row_index * 30
+            for text, x0, x1 in row:
+                blocks.append({"block_type": "text", "text": text, "bbox": [x0, top, x1, top + 20]})
+        return blocks
+
+    def _items(self, rows: list[list[tuple[str, int, int]]]) -> list[str]:
+        blocks, _carry = _repair_split_columns(self._blocks(rows), False)
+        entries: list[str] = []
+        group = "ingredient"
+        for block in blocks[1:]:
+            row_entries, group = _split_ingredient_line(block["text"], group)
+            entries.extend(item for _group_name, item in row_entries)
+        return entries
+
+    def test_right_column_name_gets_its_own_quantity(self) -> None:
+        # 书1 p92：左栏整行成块，右栏名称与用量各自成块
+        items = self._items(
+            [
+                [("配料：水玉兰片（切片）半两", 115, 315), ("水木耳", 348, 414), ("三钱", 477, 510)],
+                [("调料：酱 油 半两", 116, 315), ("味 精", 348, 414), ("二分", 477, 510)],
+            ]
+        )
+        self.assertEqual(
+            items,
+            ["配料：水玉兰片（切片） 半两", "水木耳 三钱", "调料：酱油 半两", "味精 二分"],
+        )
+
+    def test_four_cells_all_split_apart(self) -> None:
+        # 书2 p57：一行四格全被切开
+        items = self._items([[("调料：葱花", 80, 196), ("二钱", 274, 335), ("姜米", 374, 433), ("一钱", 508, 549)]])
+        self.assertEqual(items, ["调料：葱花 二钱", "姜米 一钱"])
+
+    def test_quantity_embedded_in_the_middle_block(self) -> None:
+        # 书1 p17：中间那块是「上一味的用量 + 下一味的名称」
+        items = self._items([[("调料：酱油", 110, 214), ("三钱 甜面酱", 284, 405), ("三钱", 490, 524)]])
+        self.assertEqual(items, ["调料：酱油 三钱", "甜面酱 三钱"])
+
+    def test_orphan_quantity_without_a_name_is_left_alone(self) -> None:
+        # 书1 p94：右栏名称「酱油」整块被 OCR 漏了，「六钱」无主 → 不许猜，原样留着
+        items = self._items([[("调料：绍酒 三钱", 105, 312), ("六钱", 486, 523)]])
+        self.assertEqual(items, ["调料：绍酒 三钱", "六钱"])
+
+    def test_incomplete_quantity_is_not_attached(self) -> None:
+        # 书1 p203 蜜汁葫芦：「二两」的「二」被漏掉，剩下的「两」不成用量 → 白糖就没分量
+        items = self._items([[("调料：白糖", 97, 208), ("两", 278, 315), ("蜂蜜", 348, 403), ("二两", 490, 524)]])
+        self.assertEqual(items, ["调料：白糖", "两", "蜂蜜 二两"])
+
+    def test_quantity_does_not_jump_across_printed_rows(self) -> None:
+        # 相邻行只差几个像素，行归组松一点就会把用量接到上一行的名称上
+        items = self._items([[("配料：水木耳", 115, 315)], [("味精", 115, 315), ("二分", 477, 510)]])
+        self.assertEqual(items, ["配料：水木耳", "味精 二分"])
+
+    def test_dangling_name_in_the_middle_of_a_block_keeps_its_quantity(self) -> None:
+        # 书1 p94：左块以没有用量的名称收尾（「白 糖 三分 八 角」），右块是它的用量
+        items = self._items([[("白 糖 三分 八 角", 157, 399), ("三只", 486, 521)]])
+        self.assertEqual(items, ["白糖 三分", "八角 三只"])

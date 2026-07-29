@@ -140,7 +140,15 @@ _ING_MASK = "\x00"
 # 确实跟着括号注时才吃——否则「A 二钱、B（切碎）三钱」会把顿号并进 A 的用量。
 # 这里与 obsidian_exporter._PAIR 有意不同：那边只取名字喂食材索引，
 # 多余的前导用量由 _clean_ingredient 事后剥掉，本函数则要原样保留用量串。
-_ING_QTY = rf"(?:[{_ING_NUM}]+[{_ING_UNIT}]半?)+(?:[.．。、，,]?{_ING_MASK})?"
+# 末尾允许一串光秃秃的数字：原书把「一钱二分」省写成「一钱二」（书1 p94「盐 一钱二」、
+# 书2 p57「菜籽油 一两二」，页图已核）。不收这个尾巴，用量就被截成「一钱」——
+# 那是写错分量，比不写更糟。必须锚在片段末尾（\Z）：不锚的话
+# 「酱油 二钱 三鲜汤 半斤」会把下一味料名字的首字吃成用量（「二钱三」）。
+_ING_QTY = (
+    rf"(?:[{_ING_NUM}]+[{_ING_UNIT}]半?)+"
+    rf"(?:[{_ING_NUM}]+\Z)?"
+    rf"(?:[.．。、，,]?{_ING_MASK})?"
+)
 # 名称里仍收裸括号：OCR 截断的「配料：白菜心（或」没有成对括号可掩，
 # 不收就整行匹配不上、退化成一条。
 _ING_PAIR = re.compile(rf"([一-鿿、（）(){_ING_MASK}]+?)({_ING_QTY})")
@@ -275,6 +283,163 @@ def _split_ingredient_line(text: str, current_group: str) -> tuple[list[tuple[st
         for item in _extract_ing_items(pieces[index + 1], label):
             entries.append((group, item))
     return entries, group
+
+
+# ---------------------------------------------------------------------------
+# 分栏原料表：名称块与用量块被 MinerU 拆开后的复原
+#
+# 原书原料表是「名称 用量 名称 用量」的两栏网格（书1 p92/p94、书2 p57/p137、
+# 书4 p90 等，页图已核）。MinerU 大多把一整印刷行读成一块，但遇到栏间空白过宽时
+# 会按栏切块，于是右栏的名称与用量各自成块：名称块抽不出用量，用量块没有名字，
+# 成品库里就出现一串裸食材名 + 一串孤立分量（（八三）烧牛蹄筋 是典型）。
+#
+# 复原只依据 bbox：同一印刷行（y 区间重叠）内按 x 从左到右，
+# 若某块以「光秃秃的用量」开头、而它左边一块以「没有用量的名称」结尾，
+# 就把这段用量搬到左边那块的末尾——等于把 MinerU 切开的印刷行缝回去。
+# 关键约束：**只在数据本身能定归属时才配**。
+#   · 左边那块已经以用量收尾（说明本行左栏是完整的）→ 不搬，孤立用量原样留着。
+#     书1 p94「调料：绍酒 三钱」右边的「六钱」就是这种：它的名字「酱油」整块被
+#     OCR 漏掉了，谁也不知道该配给谁，宁可留一个没名字的分量。
+#   · 用量必须是完整的「数字+单位」。书1 p203「调料：白糖」右边只剩一个「两」
+#     （「二」被漏掉），不成用量 → 不搬，白糖就没有分量，不猜。
+_ING_QTY_RE = re.compile(_ING_QTY)
+_ING_QTY_HEAD = re.compile(rf"^(?:{_ING_QTY})")
+# 判断「尾巴还是名字吗」时要忽略的字符：数字、单位、占位符与标点。
+# 剩下还有字符才算真有名字——「一两二」的尾巴「二」全是数字，不算名字。
+_ING_TAIL_FILLER = set(_ING_NUM + _ING_UNIT + _ING_MASK + "、，,。．.：:；;·…！!？?（）()「」 ")
+
+
+def _nonspace_cut(text: str, count: int) -> int:
+    """返回原文中「前 count 个非空白字符」之后的切点。
+
+    配对判断都在去空白的串上做（原书为对齐在名称/用量中间插空格，
+    「二 个」「一 两」都是一个用量），切原文时得把这些空格换算回来。
+    """
+    seen = 0
+    for index, char in enumerate(text):
+        if not char.isspace():
+            seen += 1
+            if seen == count:
+                return index + 1
+    return len(text)
+
+
+def _peel_head_qty(text: str) -> tuple[str, str]:
+    """剥掉行首那段没有名字的用量，返回 (用量, 余下文本)。"""
+    body = re.sub(r"\s+", "", text)
+    if not body:
+        return "", text
+    masked, spans = _mask_parens(body)
+    matched = _ING_QTY_HEAD.match(masked)
+    if not matched or matched.end() == 0:
+        return "", text
+    cut = _nonspace_cut(text, spans[matched.end() - 1][1])
+    return text[:cut].strip(), text[cut:].strip()
+
+
+def _ends_with_bare_name(text: str) -> bool:
+    """这块是不是以「没有用量的名称」收尾？只有这样才敢把右边的用量接过来。"""
+    body = re.sub(r"\s+", "", text)
+    if not body:
+        return False
+    label_only = _ING_LABEL.match(body)
+    if label_only and label_only.end() == len(body):
+        return False          # 光一个「调料：」不是名称，别让它把右边的用量吞了
+    masked, _spans = _mask_parens(body)
+    last_end = 0
+    for matched in _ING_QTY_RE.finditer(masked):
+        last_end = matched.end()
+    return any(char not in _ING_TAIL_FILLER for char in masked[last_end:])
+
+
+def _ingredient_region_mask(blocks: list[dict[str, Any]], carry: bool) -> tuple[list[bool], bool]:
+    """标出哪些块落在原料区内，并返回本页末尾是否仍在原料区。
+
+    原料区会跨页（书1 p202 的「一、原料：」下面，调料行续到了 p203 页首），
+    所以状态要在页间传递。章节头与菜名本身不参与配对，一律标 False。
+    """
+    mask: list[bool] = []
+    in_ingredients = carry
+    for block in blocks:
+        text = normalize_text(block.get("text", ""))
+        if is_recipe_title(text):
+            in_ingredients = False
+            mask.append(False)
+            continue
+        section, _remainder = _match_section_header(text)
+        if section is not None:
+            in_ingredients = section == "ingredients"
+            mask.append(False)
+            continue
+        mask.append(in_ingredients)
+    return mask, in_ingredients
+
+
+def _printed_rows(items: list[tuple[int, dict[str, Any]]]) -> list[list[tuple[int, dict[str, Any]]]]:
+    """按 bbox 的 y 区间重叠把块归成印刷行，行内按 x 从左到右排序。
+
+    用「重叠过半」而不是「中心点相差几像素」：原料表相邻行只差 3～5 像素间距，
+    中心点容差稍大就会把上下两行并成一行，用量会接到上一行的名称上。
+    """
+    rows: list[list[tuple[int, dict[str, Any]]]] = []
+    for entry in sorted(items, key=lambda pair: (pair[1]["bbox"][1] + pair[1]["bbox"][3]) / 2):
+        bbox = entry[1]["bbox"]
+        placed = False
+        if rows:
+            head = rows[-1][0][1]["bbox"]
+            overlap = min(head[3], bbox[3]) - max(head[1], bbox[1])
+            shorter = min(head[3] - head[1], bbox[3] - bbox[1])
+            if shorter > 0 and overlap * 2 >= shorter:
+                rows[-1].append(entry)
+                placed = True
+        if not placed:
+            rows.append([entry])
+    for row in rows:
+        row.sort(key=lambda pair: pair[1]["bbox"][0])
+    return rows
+
+
+def _repair_split_columns(
+    blocks: list[dict[str, Any]],
+    carry: bool,
+) -> tuple[list[dict[str, Any]], bool]:
+    """把被 MinerU 按栏切开的原料行缝回去（详见本节顶部说明）。"""
+    mask, next_carry = _ingredient_region_mask(blocks, carry)
+    candidates = [
+        (index, block)
+        for index, (block, flag) in enumerate(zip(blocks, mask))
+        if flag and isinstance(block.get("bbox"), list) and len(block["bbox"]) == 4
+    ]
+    if len(candidates) < 2:
+        return blocks, next_carry
+
+    patched: dict[int, str] = {}
+    dropped: set[int] = set()
+    for row in _printed_rows(candidates):
+        if len(row) < 2:
+            continue
+        previous_index = -1
+        for index, block in row:
+            text = patched.get(index, normalize_text(block.get("text", "")))
+            if previous_index >= 0:
+                head_qty, remainder = _peel_head_qty(text)
+                if head_qty and _ends_with_bare_name(patched[previous_index]):
+                    patched[previous_index] = f"{patched[previous_index]} {head_qty}"
+                    text = remainder
+                    if not text:
+                        dropped.add(index)
+                        continue
+            patched[index] = text
+            previous_index = index
+
+    repaired: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks):
+        if index in dropped:
+            continue
+        if index in patched and patched[index] != normalize_text(block.get("text", "")):
+            block = {**block, "text": patched[index]}
+        repaired.append(block)
+    return repaired, next_carry
 
 
 # 章节序号前缀：原书排版不一，「一、原料」「一 原料」「一，原料」「一.原料」都出现过。
@@ -494,14 +659,19 @@ def segment_book(
     fallbacks: list[PageFallbackNote] = []
     review_items: list[ReviewItem] = []
     active: ActiveRecipe | None = None
+    # 原料区跨页续行：本页开头是否还在上一页的原料区里（分栏复原要按页做，
+    # 因为 bbox 的 y 只在页内可比）
+    ingredients_carry = False
 
     for page in sorted(pages, key=lambda item: item.local_page):
         blocks = [block for block in page.text_blocks if normalize_text(block.get("text", ""))]
+        blocks, ingredients_carry = _repair_split_columns(blocks, ingredients_carry)
         title_positions = find_recipe_title_positions(blocks)
         page_kind = page.structure_hints.get("page_kind")
 
         is_appendix = _is_appendix_page(blocks)
         if (page_kind in {"toc", "front_matter", "category"} or is_appendix) and not title_positions:
+            ingredients_carry = False
             if active is not None:
                 recipe, recipe_reviews = _finalize_recipe(active)
                 recipes.append(recipe)
