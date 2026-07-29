@@ -226,20 +226,102 @@ def _unmask(text: str, spans: list[tuple[int, int]], start: int, end: int) -> st
     return text[spans[start][0]:spans[end - 1][1]]
 
 
+_WHITESPACE = re.compile(r"\s")
+
+
+def _strip_spaces_with_map(text: str) -> tuple[str, list[int]]:
+    """去掉空白，同时返回「去空白串的每个下标 → 原文下标」的映射。
+
+    配对判断必须在去空白的串上做（原书为对齐在名称/用量中间插空格），
+    但残余片段要按原文切片才能保住字段之间的空格（「食盐 味精 适量」是三个词，
+    按去空白串取回就粘成「食盐味精适量」）。
+    """
+    kept = [index for index, char in enumerate(text) if not _WHITESPACE.match(char)]
+    return "".join(text[index] for index in kept), kept
+
+
+# 未被任何「名称+用量」对覆盖的残余文本要保留，但先得判断它是不是一条真原料。
+# 两端先剥掉标点（「。香菜（切段）」→「香菜（切段）」，「八角，」→「八角」），
+# 但**不剥括号**：原书的「（切段）」「（实耗）」是条目自身的注。
+_ING_RESIDUE_EDGE = "、，,。．.：:；;·…！!？?-－—‐~～"
+# 剥完必须还剩汉字/数字/字母才算内容。这一条挡掉全书 27 处行末孤立句号、
+# 「1.」这种步骤序号残片，以及 OCR 用来占位漏字的「▢」。
+_ING_RESIDUE_REAL = re.compile(r"[一-鿿0-9A-Za-z]")
+# 本书有 4 道菜（（八〇）糯米稍梅、（十三）黄桂油糕、（99）四季豆腐、（一）鳝鱼煮馍 一带）
+# 的「制法」标题整行没被 OCR 出来，整段做法散文留在原料区——那些行本来就已经
+# 产出一堆假条目（属上游分区缺陷，另案）。残余片段在这里会是半句话，
+# 灌进原料表只会更脏，所以这类片段只跳过收集，其它行为一概不变。
+# 判据：以步骤序号开头，或长段落里出现句中句号/分号——原书的原料行只在末尾带句号。
+_STEP_ENUM_HEAD = re.compile(r"^\s*\d+\s*[.、．]")
+_PROSE_BREAK = re.compile(r"[。；](?!\s*$)")
+_PROSE_MIN_LEN = 40
+
+
+def _residue_items(
+    segment: str,
+    body_map: list[int],
+    masked: str,
+    spans: list[tuple[int, int]],
+    covered: bytearray,
+) -> list[tuple[int, str]]:
+    """收集「一个 pair 都没覆盖到」的残余片段，作为不带用量的条目保留。
+
+    原书里这些残余绝大多数是**用量不是数词**的条目：「酱油 少许」「菜油 适量」
+    「香精 微量」「葱段、姜块少许」，以及 OCR 把「半两」读成「平两」这类错字
+    （sxcp-1 p79 条子肉 的「菜籽油 平两」）。旧实现只在整段一个都配不上时兜底，
+    于是「湿淀粉 一钱半 菜籽油 平两」前半配上、后半被静默丢掉。
+    这里**不猜用量**：配不上就照原文留着，OCR 错字交给校对/清洗规则。
+    """
+    if _STEP_ENUM_HEAD.match(segment):
+        return []
+    if len(segment) >= _PROSE_MIN_LEN and _PROSE_BREAK.search(segment):
+        return []
+    found: list[tuple[int, str]] = []
+    index = 0
+    while index < len(masked):
+        if covered[index]:
+            index += 1
+            continue
+        end = index
+        while end < len(masked) and not covered[end]:
+            end += 1
+        start_char = body_map[spans[index][0]]
+        end_char = body_map[spans[end - 1][1] - 1] + 1
+        text = segment[start_char:end_char].strip().strip(_ING_RESIDUE_EDGE).strip()
+        # 先合并对齐空格再判标签：原书的「配 料：」被 OCR 读散后残余是「配 料」，
+        # 不先合并就认不出它只是个组标签
+        text = _join_aligned_chars(text)
+        if text and _ING_RESIDUE_REAL.search(text):
+            label_only = _ING_LABEL.match(text)
+            # 光一个「配料」不是条目（OCR 把「配 料：」读散时会剩下它）
+            if not (label_only and label_only.end() == len(text)):
+                found.append((index, text))
+        index = end
+    return found
+
+
 def _extract_ing_items(segment: str, label: str) -> list[str]:
     """把一个（可能带组标签的）原料片段拆成若干「名称 用量」条目。"""
     segment = segment.strip("：: ")
     if not segment:
         return []
-    body = re.sub(r"\s+", "", segment)
+    body, body_map = _strip_spaces_with_map(segment)
     masked, spans = _mask_parens(body)
-    items = []
+    found: list[tuple[int, str]] = []
+    covered = bytearray(len(masked))
     for matched in _ING_PAIR.finditer(masked):
         name = _clean_ing_name(_unmask(body, spans, *matched.span(1)))
         if not name:
             continue
-        items.append(f"{name} {_unmask(body, spans, *matched.span(2))}")
-    if not items:
+        found.append((matched.start(), f"{name} {_unmask(body, spans, *matched.span(2))}"))
+        for position in range(matched.start(), matched.end()):
+            covered[position] = 1
+    if found:
+        # 配上的条目与残余片段按原文先后混排，顺序与原书一致
+        found.extend(_residue_items(segment, body_map, masked, spans, covered))
+        found.sort(key=lambda pair: pair[0])
+        items = [text for _position, text in found]
+    else:
         # 拆不出用量时整段保留，不丢信息（只收掉对齐用的字间空格）
         items = [_join_aligned_chars(segment)]
     if label:

@@ -14,8 +14,9 @@
 #   book_id      必填，sxcp-1 … sxcp-4
 #   local_page   必填，本地页码（整数）。跨页菜谱只要 local_pages 里含此页即可命中。
 #   anchor       必填，正文里要挂上角标的锚文本。**必须与 vault 笔记里渲染出来的文本逐字一致**
-#                （含空格、全角标点、弯引号）；只在 食材／调料／做法／特点 四段里查找，
-#                raw_excerpt 与 frontmatter 之外的部分不参与匹配。
+#                （含空格、全角标点、弯引号）；菜谱页只在 食材／调料／做法／特点 四段里查找，
+#                附录页（page_fallbacks/ → appendix/）只在 `## 页面文本` 的段落里查找；
+#                raw_excerpt 与 frontmatter 不参与匹配。
 #   note         必填，注释正文。
 #   slug         选填，显式指定挂到哪篇笔记（文件名去掉 .md）。同一页有多道菜且锚文本
 #                在多篇里都出现时用它消歧；不填时按 book_id+local_page 找候选，
@@ -23,7 +24,8 @@
 #
 # 加注流程：
 #   1. 开页图 work/review_queue/rendered/<book_id>/p<四位页码>.png 看清原书印的是什么；
-#   2. 在 work/vault/recipes/*.md 里确认锚文本逐字存在（grep 一下，注意 OCR 的半角空格）；
+#   2. 在 work/vault/recipes/*.md（或 work/vault/page_fallbacks/*.md）里确认锚文本逐字存在
+#      （grep 一下，注意 OCR 的半角空格）；
 #   3. 在本文件追加一条；
 #   4. 跑 build-site，检查 stats 里 annotations_unmatched == 0（不为 0 说明锚文本没对上，
 #      日志里有 WARNING 指出是哪一条）。
@@ -54,16 +56,12 @@ annotations:
       原书这两处印的是图形符号而不是汉字：前一个是内含数条横线的方框（平行刀纹），
       后一个是内含交叉线的方框（十字花刀）。转录时分别以 ▤ 和 ⊠ 代替，字形并不完全相同，
       实际刀纹走向请对照原书第 26 页页图。
-
-# 暂时无处安放的注释：目标页在成品站上没有对应页面。
-# 书 4 的 107–120 页是书末附录散文（冷盘的装拼方法、刀工等），在 vault 里是
-# page_fallbacks/ 而非 recipes/，而 site_builder 目前只发布 recipes/。
-# 等附录页也上站之后，把下面这条移进上面的 annotations 列表即可。
-pending:
+  # 回退页（附录专文）同样能挂注释：它们发布在 appendix/<book_id>-p<四位页码>.html，
+  # 正文只有一个「body」段（回退笔记 `## 页面文本` 的段落），锚文本在该段里逐字查找。
+  # 需要消歧时 slug 写 `sxcp-4-p0113` 这种形式（不含菜名）。
   - book_id: sxcp-4
     local_page: 113
     anchor: "缯肘"
-    reason: "该页为 page_fallback（附录散文「冷盘的装拼方法」），成品站未发布附录页"
     note: >-
       「缯肘」不是错字，是真实的菜名：源自清朝咸丰年间的传统名吃，主要流传于河北邯郸广平县
       与永年区广府一带，以精选猪前肘、剔骨捆扎和独特卤制工艺闻名。同书第 105 页

@@ -66,6 +66,21 @@ sup.fn a:hover{text-decoration:none;background:var(--accent-soft);border-radius:
 .btn{display:inline-block;border:1px solid var(--accent);color:var(--accent);
   padding:.45rem 1rem;border-radius:8px;font-size:.88rem}
 .btn:hover{background:var(--accent);color:#fff;text-decoration:none}
+.topbar nav a{margin-left:.9rem;font-size:.9rem}
+.promo{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:1rem 1.1rem;margin:0 0 1.2rem}
+.promo h2{font-size:1.05rem;margin:0 0 .3rem;letter-spacing:.08em}
+.promo h2 a{color:var(--accent)}
+.promo p{color:var(--muted);font-size:.88rem;margin:0}
+.promo .grid{margin-top:.8rem;grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+.appendix .prose p{margin:.65rem 0;text-indent:1em;text-align:justify}
+.appendix .prose{font-size:.98rem}
+.muted{color:var(--muted)}
+.pager{margin:.2rem 0 1.2rem;font-size:.88rem;color:var(--muted)}
+.pagelist{list-style:none;padding:0;margin:.4rem 0 0;display:flex;flex-wrap:wrap;gap:.4rem}
+.pagelist a{border:1px solid var(--line);background:var(--panel);border-radius:6px;
+  padding:.2rem .6rem;font-size:.82rem;display:inline-block}
+.appendix-index .block{margin-bottom:1.6rem}
 .footer{border-top:1px solid var(--line);margin-top:2rem;padding:1.2rem 1.4rem;
   color:var(--muted);font-size:.78rem;text-align:center}
 .footer p{margin:.25rem 0}

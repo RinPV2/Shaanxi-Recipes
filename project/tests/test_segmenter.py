@@ -371,3 +371,80 @@ class SplitColumnRepairTests(unittest.TestCase):
         # 书1 p94：左块以没有用量的名称收尾（「白 糖 三分 八 角」），右块是它的用量
         items = self._items([[("白 糖 三分 八 角", 157, 399), ("三只", 486, 521)]])
         self.assertEqual(items, ["白糖 三分", "八角 三只"])
+
+
+class UnpairedResidueTests(unittest.TestCase):
+    """配不上「名称+用量」的残余文本不得被静默丢弃（全书 76 处，103 道菜受影响）。
+
+    旧实现只在**整段一个 pair 都配不上**时才整段兜底，于是「前半配上、后半配不上」
+    的行会把尾巴直接扔掉：书1 p79 条子肉 的调料行「湿淀粉 一钱半　菜籽油 平两」
+    （「平」是 OCR 把「半」读错，页图 12 倍放大已核）只剩下「湿淀粉 一钱半」，
+    「菜籽油 平两」整条只活在 raw_excerpt 里。
+
+    受影响的主体是**用量不是数词**的条目——原书大量写「少许」「适量」「微量」
+    「两小片」，它们全被丢了。这里不为了配对成功而猜用量：「平两」照「平两」保留。
+    """
+
+    def _items(self, line: str) -> list[str]:
+        entries, _group = _split_ingredient_line(line, "ingredient")
+        return [item for _group_name, item in entries]
+
+    def test_ocr_garbled_quantity_tail_is_kept(self) -> None:
+        # 书1 p79 条子肉：「平两」不是数词起头 → 配不上，但不许丢，也不许猜成「半两」
+        self.assertEqual(
+            self._items("调料：湿淀粉 一钱半 菜籽油 平两"),
+            ["调料：湿淀粉 一钱半", "菜籽油 平两"],
+        )
+
+    def test_vague_quantities_are_kept(self) -> None:
+        # 「少许」「适量」「微量」在原书里到处是，一律不是数词起头
+        self.assertEqual(self._items("食盐 二钱 酱油 少许"), ["食盐 二钱", "酱油 少许"])
+        self.assertEqual(self._items("白糖 四两 桃红食色素 微量"), ["白糖 四两", "桃红食色素 微量"])
+        self.assertEqual(
+            self._items("猪棒子骨 八斤 食盐 味精 适量"),
+            ["猪棒子骨 八斤", "食盐 味精 适量"],
+        )
+
+    def test_residue_keeps_its_field_spacing(self) -> None:
+        # 残余按原文切片再合并对齐空格：「香 精 微量」→「香精 微量」，
+        # 不能像配对成功的名称那样把空格一律删光（会粘成「香精微量」以外的坨）
+        self.assertEqual(self._items("冰 糖 半两 香 精 微量"), ["冰糖 半两", "香精 微量"])
+
+    def test_residue_before_the_first_pair_takes_the_group_label(self) -> None:
+        # 书1 p161 煨鱿鱼丝：OCR 在名称与用量之间插了个「·」，配对从「一斤…」重启，
+        # 「肥瘦生猪肉」原先整块消失。它是本行第一条，组标签要挂在它头上。
+        self.assertEqual(
+            self._items("配料：肥瘦生猪肉·一 斤 鸡大腿 二个"),
+            ["配料：肥瘦生猪肉", "一斤鸡大腿 二个"],
+        )
+
+    def test_trailing_punctuation_is_not_an_item(self) -> None:
+        # 原书原料行末尾常带句号，OCR 也常读出逗号；它们不是条目
+        self.assertEqual(self._items("甜面酱 五 钱 白 糖 二 钱。"), ["甜面酱 五钱", "白糖 二钱"])
+        self.assertEqual(
+            self._items("葱花、姜米、蒜片共一钱，食盐二分"),
+            ["葱花、姜米、蒜片共 一钱", "食盐 二分"],
+        )
+
+    def test_ocr_placeholder_alone_is_not_an_item(self) -> None:
+        # 「▢」是 OCR 用来占位漏字的记号，单独留着只是残渣
+        self.assertEqual(self._items("▢淀粉 二钱"), ["淀粉 二钱"])
+        # 但「▢」出现在用量位置时，整条仍要保留（不知道分量 ≠ 没有这味料）
+        self.assertEqual(self._items("味精 二分 菜籽油 ▢钱"), ["味精 二分", "菜籽油 ▢钱"])
+
+    def test_stray_group_label_alone_is_not_an_item(self) -> None:
+        # 书2 p144：OCR 把「配 料：」读散，标签匹配不上，残余只剩个「配 料」
+        self.assertEqual(
+            self._items("配 料：水蘑菇 一两 火腿片 一 两"),
+            ["水蘑菇 一两", "火腿片 一两"],
+        )
+
+    def test_step_prose_in_the_ingredient_region_is_not_harvested(self) -> None:
+        # 有 4 道菜的「制法」标题整行没被 OCR 出来，整段做法留在原料区（上游分区缺陷，
+        # 另案）。那些行本来就已产出假条目，残余是半句话，不该再往原料表里灌句子。
+        line = "1. 豆腐切五分见方的小块，冬笋去皮洗净，开水焯过；炒勺座大火上，倒入柴油二斤(实耗二两)，油热八成"
+        self.assertEqual(self._items(line), ["豆腐切 五分", "倒入柴油 二斤(实耗二两)"])
+
+    def test_whole_segment_fallback_is_unchanged(self) -> None:
+        # 一个 pair 都配不上时仍是整段保留，行为不变
+        self.assertEqual(self._items("味 精 少许"), ["味精 少许"])
