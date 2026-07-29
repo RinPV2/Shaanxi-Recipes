@@ -54,6 +54,15 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.4rem 3rem}
 .scans figure{margin:0 0 1rem}
 .scans img{width:100%;border:1px solid var(--line);border-radius:6px;background:#fff}
 .scans figcaption{color:var(--muted);font-size:.78rem;text-align:center;margin-top:.3rem}
+sup.fn{font-size:.62em;line-height:0;vertical-align:super;margin:0 .12em}
+sup.fn a{padding:0 .12em;font-weight:700;text-decoration:none}
+sup.fn a:hover{text-decoration:none;background:var(--accent-soft);border-radius:3px}
+.notes{margin:0 0 1.4rem;border-top:1px solid var(--line);padding-top:.6rem}
+.notes summary{font-size:1rem;letter-spacing:.14em;color:var(--accent);cursor:pointer}
+.fnlist{margin:.5rem 0 0;padding-left:1.4rem;font-size:.86rem;color:var(--muted)}
+.fnlist li{margin:.45rem 0}
+.fnlist li:target{background:var(--accent-soft);border-radius:4px}
+.fn-back{font-size:.9em}
 .btn{display:inline-block;border:1px solid var(--accent);color:var(--accent);
   padding:.45rem 1rem;border-radius:8px;font-size:.88rem}
 .btn:hover{background:var(--accent);color:#fff;text-decoration:none}

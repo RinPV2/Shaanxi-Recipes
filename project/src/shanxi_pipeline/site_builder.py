@@ -84,6 +84,117 @@ def category_for(lookup: dict[str, list[tuple[int, str]]], book_id: str, page: i
     return current
 
 
+ANNOTATED_SECTIONS = ("ingredients", "seasonings", "steps", "tips")
+
+
+def load_annotations(path: Path) -> list[dict[str, Any]]:
+    """读取 config/annotations.yaml 的 annotations 列表（缺文件=没有注释）。
+
+    `pending` 段落里的条目故意不返回：那是目标页尚未上站、暂存待用的注释，
+    算进匹配统计只会让 annotations_unmatched 常年不为 0，掩盖真正的锚文本失配。
+    """
+    if not path.exists():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        LOGGER.warning("annotations.yaml 无法解析，本次不渲染注释: %s", path)
+        return []
+    items = data.get("annotations") or []
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            LOGGER.warning("annotations[%s] 不是映射，跳过", index)
+            continue
+        missing = [k for k in ("book_id", "local_page", "anchor", "note") if not item.get(k)]
+        if missing:
+            LOGGER.warning("annotations[%s] 缺字段 %s，跳过", index, "/".join(missing))
+            continue
+        result.append(item)
+    return result
+
+
+def annotations_for_recipe(
+    annotations: list[dict[str, Any]], recipe: dict[str, Any], used: set[int]
+) -> list[dict[str, Any]]:
+    """挑出该菜谱的候选注释（按 book_id + local_page，可用 slug 显式指定）。
+
+    `used` 记下已被别的菜谱认领的注释 id，避免同一页两道菜都挂同一条。
+    """
+    book_id = recipe.get("book_id", "")
+    pages = set(recipe.get("local_pages") or [])
+    slug = recipe.get("slug", "")
+    picked: list[dict[str, Any]] = []
+    for item in annotations:
+        if id(item) in used:
+            continue
+        target_slug = item.get("slug")
+        if target_slug:
+            if target_slug != slug:
+                continue
+        elif item.get("book_id") != book_id or item.get("local_page") not in pages:
+            continue
+        picked.append(item)
+    return picked
+
+
+def attach_annotations(
+    recipe: dict[str, Any], candidates: list[dict[str, Any]]
+) -> tuple[dict[str, list[str]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """把上角标插进正文（已转义的 HTML 片段），返回 (各段 HTML 行, 命中的注释, 落空的注释)。
+
+    段内按 食材→调料→做法→特点 的顺序扫描，锚文本只在首次出现处挂角标。
+    返回的行是 HTML，调用方不得再次转义。
+    """
+    rows: dict[str, list[str]] = {}
+    for key in ANNOTATED_SECTIONS:
+        rows[key] = [_esc(row) for row in (recipe.get(key) or []) if str(row).strip()]
+
+    matched: list[dict[str, Any]] = []
+    pending = list(candidates)
+    number = 0
+    # 按正文顺序走；一行里有多条注释时取最靠前的锚文本先挂，编号才跟阅读顺序一致。
+    for key in ANNOTATED_SECTIONS:
+        for row_index in range(len(rows[key])):
+            while pending:
+                hits = [
+                    (position, item)
+                    for item in pending
+                    if (position := rows[key][row_index].find(_esc(item["anchor"]))) >= 0
+                ]
+                if not hits:
+                    break
+                position, item = min(hits, key=lambda pair: pair[0])
+                number += 1
+                cut = position + len(_esc(item["anchor"]))
+                sup = (
+                    f'<sup class="fn"><a id="fnref-{number}" href="#fn-{number}">'
+                    f"{number}</a></sup>"
+                )
+                row = rows[key][row_index]
+                rows[key][row_index] = row[:cut] + sup + row[cut:]
+                matched.append(item)
+                pending.remove(item)
+
+    # 这里不记 WARNING：同一页有多道菜时，一条注释在别的菜谱里落空是正常的。
+    # 真正的失配由 build_site 在扫完全库后统一判定（谁都没认领 = 未命中）。
+    return rows, matched, pending
+
+
+def render_footnotes(matched: list[dict[str, Any]]) -> str:
+    if not matched:
+        return ""
+    lis = "\n".join(
+        f'<li id="fn-{i}">{_esc(item["note"])} '
+        f'<a class="fn-back" href="#fnref-{i}" aria-label="返回正文">↩</a></li>'
+        for i, item in enumerate(matched, start=1)
+    )
+    return (
+        '<details class="notes" open><summary>注释（{n}）</summary>'
+        '<ol class="fnlist">{lis}</ol></details>'
+    ).format(n=len(matched), lis=lis)
+
+
 def _first_page(recipe: dict[str, Any]) -> int | None:
     pages = recipe.get("local_pages") or []
     return pages[0] if pages else None
@@ -138,18 +249,26 @@ def _layout(title: str, body: str, *, depth: int, extra_head: str = "") -> str:
 """
 
 
-def render_recipe_page(recipe: dict[str, Any], category: str, site_base: str) -> str:
+def render_recipe_page(
+    recipe: dict[str, Any],
+    category: str,
+    site_base: str,
+    annotations: list[dict[str, Any]] | None = None,
+) -> str:
     title = recipe.get("title") or recipe.get("slug", "")
     book_id = recipe.get("book_id", "")
     pages: list[int] = recipe.get("local_pages") or []
     slug = recipe["slug"]
     page_url = f"{site_base}/recipes/{slug}.html" if site_base else f"recipes/{slug}.html"
 
-    def section(heading: str, items: list[str], cls: str = "") -> str:
-        rows = [i for i in (items or []) if str(i).strip()]
+    # 正文行在这里已经转义完并插好上角标；section() 不得再转义。
+    rows_by_key, matched, _unmatched = attach_annotations(recipe, list(annotations or []))
+
+    def section(heading: str, key: str, cls: str = "") -> str:
+        rows = rows_by_key.get(key) or []
         if not rows:
             return ""
-        lis = "\n".join(f"<li>{_esc(row)}</li>" for row in rows)
+        lis = "\n".join(f"<li>{row}</li>" for row in rows)
         return f'<section class="block {cls}"><h2>{heading}</h2><ul>{lis}</ul></section>'
 
     images = "\n".join(
@@ -177,10 +296,11 @@ def render_recipe_page(recipe: dict[str, Any], category: str, site_base: str) ->
   {flag}
   <div class="cols">
     <div class="text">
-      {section("食材", recipe.get("ingredients"))}
-      {section("调料", recipe.get("seasonings"))}
-      {section("做法", recipe.get("steps"), "steps")}
-      {section("特点", recipe.get("tips"))}
+      {section("食材", "ingredients")}
+      {section("调料", "seasonings")}
+      {section("做法", "steps", "steps")}
+      {section("特点", "tips")}
+      {render_footnotes(matched)}
       <p class="report"><a class="btn" href="{_esc(_issue_url(recipe, page_url))}" target="_blank" rel="noopener">发现错误？提交纠错</a></p>
     </div>
     <aside class="scans">
@@ -282,6 +402,15 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.4rem 3rem}
 .scans figure{margin:0 0 1rem}
 .scans img{width:100%;border:1px solid var(--line);border-radius:6px;background:#fff}
 .scans figcaption{color:var(--muted);font-size:.78rem;text-align:center;margin-top:.3rem}
+sup.fn{font-size:.62em;line-height:0;vertical-align:super;margin:0 .12em}
+sup.fn a{padding:0 .12em;font-weight:700;text-decoration:none}
+sup.fn a:hover{text-decoration:none;background:var(--accent-soft);border-radius:3px}
+.notes{margin:0 0 1.4rem;border-top:1px solid var(--line);padding-top:.6rem}
+.notes summary{font-size:1rem;letter-spacing:.14em;color:var(--accent);cursor:pointer}
+.fnlist{margin:.5rem 0 0;padding-left:1.4rem;font-size:.86rem;color:var(--muted)}
+.fnlist li{margin:.45rem 0}
+.fnlist li:target{background:var(--accent-soft);border-radius:4px}
+.fn-back{font-size:.9em}
 .btn{display:inline-block;border:1px solid var(--accent);color:var(--accent);
   padding:.45rem 1rem;border-radius:8px;font-size:.88rem}
 .btn:hover{background:var(--accent);color:#fff;text-decoration:none}
@@ -372,6 +501,9 @@ def build_site(root: Path) -> dict[str, Any]:
     recipes = load_recipes(vault_root)
     anchor_map = json.loads(anchor_path.read_text(encoding="utf-8")) if anchor_path.exists() else {}
     lookup = build_category_lookup(anchor_map)
+    annotations = load_annotations(root / "project" / "config" / "annotations.yaml")
+    claimed: set[int] = set()
+    annotations_rendered = 0
 
     site_dir = root / "site"
     recipes_dir = root / "recipes"
@@ -408,8 +540,14 @@ def build_site(root: Path) -> dict[str, Any]:
                 "s": blob,
             }
         )
+        # 先算命中情况（这一步负责 WARNING 与统计），再把命中的那几条交给渲染。
+        # 只传命中的，渲染时就不会重复报一遍未命中。
+        candidates = annotations_for_recipe(annotations, recipe, claimed)
+        _rows, matched, _missed = attach_annotations(recipe, candidates)
+        claimed.update(id(item) for item in matched)
+        annotations_rendered += len(matched)
         (recipes_dir / f"{recipe['slug']}.html").write_text(
-            render_recipe_page(recipe, category, SITE_BASE), encoding="utf-8"
+            render_recipe_page(recipe, category, SITE_BASE, matched), encoding="utf-8"
         )
 
     entries.sort(key=lambda e: (e["b"], e["u"]))
@@ -436,16 +574,34 @@ def build_site(root: Path) -> dict[str, Any]:
             stale.unlink()
             pruned += 1
 
+    # 一条注释若全库无人认领，就是锚文本没对上（菜名改了、文本被归一化动过、页码写错）。
+    # 静默跳过会让注释悄悄消失，所以在这里显形。
+    unmatched = [item for item in annotations if id(item) not in claimed]
+    for item in unmatched:
+        LOGGER.warning(
+            "注释锚文本未命中，该注释不会出现在站上: %s p%s 「%s」%s",
+            item.get("book_id"),
+            item.get("local_page"),
+            item.get("anchor"),
+            f"（slug={item['slug']}）" if item.get("slug") else "",
+        )
+
     stats = {
         "recipes": len(recipes),
         "pruned": pruned,
         "categories": len(ordered_categories),
         "uncategorized": sum(1 for e in entries if e["c"] == UNCATEGORIZED),
+        "annotations": len(annotations),
+        "annotations_rendered": annotations_rendered,
+        "annotations_unmatched": len(unmatched),
     }
     LOGGER.info(
-        "Site built: %s recipes, %s categories (%s uncategorized)",
+        "Site built: %s recipes, %s categories (%s uncategorized), "
+        "annotations %s rendered / %s unmatched",
         stats["recipes"],
         stats["categories"],
         stats["uncategorized"],
+        stats["annotations_rendered"],
+        stats["annotations_unmatched"],
     )
     return stats
