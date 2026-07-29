@@ -15,11 +15,18 @@ GENERIC_INGREDIENTS = {"主料", "配料", "调料", "原料", "用料", "适量
 # 原书用量：数字串 + 单位（+「半」）。尾部不再吞数字，否则会吃掉下一个食材名的首字
 # （「生 姜 三分 八 角 一只」去空格后「三分八」把「八」吃走，剩下孤字「角」）。
 _NUM = "〇零一二三四五六七八九十百半两几"
-_UNIT = "钱两斤分个只片粒条张朵克根块付副枚棵把碗匙勺撮"
-_QTY = rf"[{_NUM}]+[{_UNIT}]半?"
+# 「厘段头」与数词后可省的「大／小」：口径与 recipe_segmenter._ING_UNIT 一致。
+# 表外量词「对」两边都不收——收了它，真食材「对虾」会被前导用量剥离剥成「虾」。
+_UNIT = "钱两斤分个只片粒条张朵克根块付副枚棵把碗匙勺撮厘段头"
+_SIZE = "大小"
+_QTY = rf"[{_NUM}]+[{_SIZE}]?[{_UNIT}]半?"
 _CJK = "一-鿿"
 _PAIR = re.compile(rf"([{_CJK}、]+?)({_QTY})")
-_LEAD_QTY = re.compile(rf"^[{_NUM}]+[{_UNIT}]半?(?=.)")
+_LEAD_QTY = re.compile(rf"^[{_NUM}]+[{_SIZE}]?[{_UNIT}]半?(?=.)")
+# 模糊用量：原书把用量写成「少许」「适量」「微量」的条目，旧实现一个名字都抽不出
+# （_PAIR 只认数词+量词），于是「酱油 少许」「葱段、姜块少许」这类条目在食材索引里
+# 整条缺席（书4 横排流水原料文尤其严重）。它们是原书的合法用量写法，与数词用量同等对待。
+_VAGUE = re.compile("少许|适量|微量|少量|若干|酌量")
 _LABEL = re.compile(r"^(主料|配料|调料|原料|用料)\s*[:：]?")
 _PAREN = re.compile(r"[（(][^）)]*[）)]")
 # 含句读或步骤号的行是制法正文，不是原料表
@@ -71,22 +78,46 @@ def _extract_terms(lines: list[str]) -> list[str]:
     切词——那会把名字打碎成单字。改为按「名称 + 用量」配对切分。
     """
     terms: list[str] = []
+
+    def collect(name: str | None) -> None:
+        cleaned = _clean_ingredient(name) if name else None
+        if not cleaned:
+            return
+        for part in cleaned.split("、"):
+            part = part.strip()
+            if part and part not in GENERIC_INGREDIENTS and part not in _BAD_SINGLE:
+                terms.append(part)
+
     for line in lines:
         raw = normalize_text(line)
         if _SENTENCE.search(raw):
             continue
-        text = _LABEL.sub("", _PAREN.sub("", raw).strip())
-        text = re.sub(r"\s+", "", text)
+        spaced = _LABEL.sub("", _PAREN.sub("", raw).strip())
+        text = re.sub(r"\s+", "", spaced)
         if not text or len(text) > 30:
             continue
         for match in _PAIR.finditer(text):
-            cleaned = _clean_ingredient(match.group(1))
-            if not cleaned:
+            collect(match.group(1))
+        # 模糊用量那一路必须在**带空格**的原文上走：分段器已经把每味料切成独立条目，
+        # 条目里剩下的空格是原书的栏间分隔（「水木耳 水玉兰片 适量」是两味料共用一个
+        # 用量，书4 p81 油焖腐竹），去掉空格就粘成「水木耳水玉兰片」再也分不开。
+        # 判据与 _join_aligned_chars 同源：
+        #   · 名称段内没有空格 → 整段就是一个名字（「盐 少许」→ 盐、「八角、桂皮 少许」→ 八角+桂皮）；
+        #   · 有空格 → 按空格切，只收两字以上的词。单字词在原书里是对齐拆碎的名称
+        #     （「味 精 少许」的「味」「精」），当成独立食材只会造出假名字。
+        start = 0
+        for match in _VAGUE.finditer(spaced):
+            head = spaced[start:match.start()].strip()
+            start = match.end()
+            if not head:
                 continue
-            for part in cleaned.split("、"):
-                part = part.strip()
-                if part and part not in GENERIC_INGREDIENTS and part not in _BAD_SINGLE:
-                    terms.append(part)
+            tokens = head.split()
+            if len(tokens) == 1:
+                collect(tokens[0])
+            else:
+                for token in tokens:
+                    if len(token) > 1:
+                        collect(token)
     return list(dict.fromkeys(terms))
 
 

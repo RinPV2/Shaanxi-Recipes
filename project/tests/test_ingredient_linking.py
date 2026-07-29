@@ -123,10 +123,16 @@ class NotFoodExclusionTests(unittest.TestCase):
         self.assertIn("面粉", bases)
         self.assertFalse(bases & {"冬季", "春秋季", "酵面夏季"})
 
-    def test_glued_two_ingredient_fragment_never_enters_the_index(self):
-        recipes = [{"slug": "a", "book_id": "sxcp-4", "ingredients": ["盐少许粉面 四两"],
-                    "seasonings": ["菜油适量绍酒 一两"]}]
-        self.assertEqual(site_builder.build_ingredient_index(recipes), [])
+    def test_glued_two_ingredient_fragment_is_no_longer_produced_at_all(self):
+        # 从前这两条粘连写法要靠排除名单挡住；根因（模糊用量不作断点）修掉后，
+        # 分段器不会再产出它们，名单里也就删掉了。万一哪天粘连写法回来了，
+        # 抽取器至少不许把整段「甲少许乙」当成一个名字喂进索引。
+        for glued in ("盐少许粉面", "菜油适量绍酒", "葱一段姜", "味精五厘绍酒"):
+            self.assertNotIn(glued, site_builder.INGREDIENT_NOT_FOOD)
+        recipes = [{"slug": "a", "book_id": "sxcp-4", "ingredients": ["盐 少许", "粉面 四两"],
+                    "seasonings": ["菜油 适量", "绍酒 一两"]}]
+        bases = {item["base"] for item in site_builder.build_ingredient_index(recipes)}
+        self.assertEqual(bases, {"盐", "粉面", "菜油", "绍酒"})
 
     def test_excluded_form_is_still_shown_in_the_recipe_body_just_not_linked(self):
         recipes = [{"slug": "a", "book_id": "sxcp-3",

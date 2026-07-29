@@ -120,7 +120,17 @@ def _append_to_active(active: ActiveRecipe, page: NormalizedPage, blocks: list[d
 
 # 原书用量：数字串 + 单位（+「半」）。字符表与 obsidian_exporter 中的口径保持一致。
 _ING_NUM = "〇零一二三四五六七八九十百半两几"
-_ING_UNIT = "钱两斤分个只片粒条张朵克根块付副枚棵把碗匙勺撮"
+# 量词表里的「厘段头」是全库扫「数词 + 表外汉字」逐个核出来的（各 2 例，页图已核）：
+#   厘 = 钱的百分之一（书1 p80「红色素 一厘」、书2 p122「味精 五厘」）；
+#   段 = 葱的计数单位（书4 p0036/p0089「葱 一段　姜 一块」）；
+#   头 = 蒜的计数单位（书4 p0033「蒜 两头」、p0055「蒜 一头」）。
+# 不收进来，这三个用量就认不出，后面那味料的名字会被前一味整段吞掉（「葱一段姜」）。
+# 唯一没收的表外量词是「对」（书4 p0070「鸭腿 五对」，仅 1 例）：收了它，
+# obsidian_exporter 那边的前导用量剥离会把真食材「对虾」剥成「虾」，不值当。
+_ING_UNIT = "钱两斤分个只片粒条张朵克根块付副枚棵把碗匙勺撮厘段头"
+# 数词与量词之间容一个「大／小」（书1 p32「紫菜 两小片」）。必须有数词在前才认，
+# 所以不会咬到「小曲」「大葱」这类以大小起头的真名字。
+_ING_SIZE = "大小"
 # 成对括号注。原书括号里既有工艺说明（（去皮）（切细丝）（实耗）），也有用量说明
 # （（一条）（约二斤）（2-3斤）（约100条）），全角半角还常混排（「绿叶菜(洗净）」）。
 # 允许嵌一层：「红薯一斤半（山药、扁（豌）豆粉亦可）」只认内层会把外层整段漏掉。
@@ -145,10 +155,16 @@ _ING_MASK = "\x00"
 # 那是写错分量，比不写更糟。必须锚在片段末尾（\Z）：不锚的话
 # 「酱油 二钱 三鲜汤 半斤」会把下一味料名字的首字吃成用量（「二钱三」）。
 _ING_QTY = (
-    rf"(?:[{_ING_NUM}]+[{_ING_UNIT}]半?)+"
+    rf"(?:[{_ING_NUM}]+[{_ING_SIZE}]?[{_ING_UNIT}]半?)+"
     rf"(?:[{_ING_NUM}]+\Z)?"
     rf"(?:[.．。、，,]?{_ING_MASK})?"
 )
+# 模糊用量。原书大量把用量写成「少许」「适量」「微量」而不是数词+量词，
+# 这类写法在别处早已被当作合法用量收下（残余条目照原文保留「酱油 少许」），
+# 但**配对时**不算断点，于是横排流水的原料文里「甲少许乙 四两」整段被当成一个名字：
+# 「盐少许粉面 四两」（书4 p16 琉璃肉）本该是「盐 少许」+「粉面 四两」。
+# 断点判据见 _split_at_vague：模糊用量前面必须已经有名字才切。
+_ING_VAGUE = re.compile("少许|适量|微量|少量|若干|酌量")
 # 名称里仍收裸括号：OCR 截断的「配料：白菜心（或」没有成对括号可掩，
 # 不收就整行匹配不上、退化成一条。
 _ING_PAIR = re.compile(rf"([一-鿿、（）(){_ING_MASK}]+?)({_ING_QTY})")
@@ -257,13 +273,59 @@ _PROSE_BREAK = re.compile(r"[。；](?!\s*$)")
 _PROSE_MIN_LEN = 40
 
 
+def _outside_parens(text: str) -> list[bool]:
+    """逐字标出「不在括号注里」。括号里的模糊用量不是本条的用量，
+    而是工艺说明或分季说明（「（按四季选用时鲜菜少许）」「（用适量开水冲泡）」），
+    在那里断开会把一句话腰斩。"""
+    flags: list[bool] = []
+    depth = 0
+    for char in text:
+        if char in "（(":
+            depth += 1
+        flags.append(depth == 0)
+        if char in "）)" and depth:
+            depth -= 1
+    return flags
+
+
+def _split_at_vague(text: str, cut_last: bool) -> tuple[list[str], str]:
+    """按模糊用量把一段原料文本切成若干「名称 模糊用量」条目 + 尾巴。
+
+    返回 (条目列表, 尾巴原文)。切点只落在模糊用量之后，且要求**它前面已经有名字**——
+    「适量酱油 五钱」这种模糊用量打头的（前一味料的用量被 MinerU 断到了本块开头）
+    不切，照旧原样留着，不猜它属于谁。
+
+    `cut_last` 区分两条调用路径，差别只在「最后一个模糊用量」：
+      · 配对路径（True）：本段末尾另有一个数词用量在等着接名字（「盐少许粉面 四两」），
+        所以每个模糊用量都能安全断开，最后剩下的就是那个数词用量的名字。
+      · 残余路径（False）：末尾那个模糊用量后面剩下的东西没有用量作凭据，
+        不知道是下一味料（书3 p76「青油、糖色少许 葱花」的「葱花」）
+        还是散文尾巴（书3 p122「…等调料适量使用。」的「使用」），一律不切。
+        于是「米醋 适量 蒜水 适量」照两味料断开，而「食盐 味精 适量」
+        （两味料共用一个用量，原书如此）整条不动。
+    """
+    outside = _outside_parens(text)
+    cuts = [match.span() for match in _ING_VAGUE.finditer(text) if outside[match.start()]]
+    if not cut_last:
+        cuts = cuts[:-1]
+    items: list[str] = []
+    start = 0
+    for begin, end in cuts:
+        name = _join_aligned_chars(text[start:begin].strip().strip(_ING_RESIDUE_EDGE).strip())
+        if not name or not _ING_RESIDUE_REAL.search(name):
+            continue                     # 模糊用量前面没名字 → 不是断点
+        items.append(f"{name} {text[begin:end]}")
+        start = end
+    return items, text[start:]
+
+
 def _residue_items(
     segment: str,
     body_map: list[int],
     masked: str,
     spans: list[tuple[int, int]],
     covered: bytearray,
-) -> list[tuple[int, str]]:
+) -> list[tuple[float, str]]:
     """收集「一个 pair 都没覆盖到」的残余片段，作为不带用量的条目保留。
 
     原书里这些残余绝大多数是**用量不是数词**的条目：「酱油 少许」「菜油 适量」
@@ -291,11 +353,20 @@ def _residue_items(
         # 先合并对齐空格再判标签：原书的「配 料：」被 OCR 读散后残余是「配 料」，
         # 不先合并就认不出它只是个组标签
         text = _join_aligned_chars(text)
-        if text and _ING_RESIDUE_REAL.search(text):
-            label_only = _ING_LABEL.match(text)
+        # 残余里也会挤着多味料，各带自己的模糊用量（书4 p55 桶子鸡
+        # 「葱段、姜块少许芝麻油少许」）。按模糊用量断开，末尾那个不动（见 _split_at_vague）。
+        pieces, tail = _split_at_vague(text, cut_last=False)
+        pieces.append(_join_aligned_chars(tail.strip().strip(_ING_RESIDUE_EDGE).strip()))
+        # 同一残余块切出的多条要保持原文先后：位置用小数偏移错开，不与别的块相撞
+        step = 1 / (len(pieces) + 1)
+        for order, piece in enumerate(pieces):
+            if not piece or not _ING_RESIDUE_REAL.search(piece):
+                continue
+            label_only = _ING_LABEL.match(piece)
             # 光一个「配料」不是条目（OCR 把「配 料：」读散时会剩下它）
-            if not (label_only and label_only.end() == len(text)):
-                found.append((index, text))
+            if label_only and label_only.end() == len(piece):
+                continue
+            found.append((index + order * step, piece))
         index = end
     return found
 
@@ -307,13 +378,31 @@ def _extract_ing_items(segment: str, label: str) -> list[str]:
         return []
     body, body_map = _strip_spaces_with_map(segment)
     masked, spans = _mask_parens(body)
-    found: list[tuple[int, str]] = []
+    found: list[tuple[float, str]] = []
     covered = bytearray(len(masked))
     for matched in _ING_PAIR.finditer(masked):
-        name = _clean_ing_name(_unmask(body, spans, *matched.span(1)))
+        # 配到的「名字」里可能还夹着前一味料的模糊用量：横排流水的原料文里
+        # 「盐少许粉面 四两」（书4 p16 琉璃肉）只有末尾那个数词用量能触发配对，
+        # 于是「盐少许粉面」整段成了一个名字。按原文（带空格、带括号注）切开——
+        # 名字切片必须取原文而不是去空白串，否则「水木耳 水玉兰片适量」
+        # 会先粘成「水木耳水玉兰片」，两味料再也分不开。
+        name_start = body_map[spans[matched.start(1)][0]]
+        name_end = body_map[spans[matched.end(1) - 1][1] - 1] + 1
+        vague_items, tail = _split_at_vague(segment[name_start:name_end], cut_last=True)
+        if vague_items and not _clean_ing_name(tail):
+            # 最后一个模糊用量之后没剩下名字（数词用量的主人被 OCR 漏了）→
+            # 断在哪里没凭据，整段照旧当一个名字，不猜
+            vague_items = []
+        name = _clean_ing_name(tail if vague_items else _unmask(body, spans, *matched.span(1)))
         if not name:
             continue
-        found.append((matched.start(), f"{name} {_unmask(body, spans, *matched.span(2))}"))
+        step = 1 / (len(vague_items) + 2)
+        for order, item in enumerate(vague_items):
+            found.append((matched.start() + order * step, item))
+        found.append(
+            (matched.start() + len(vague_items) * step,
+             f"{name} {_unmask(body, spans, *matched.span(2))}")
+        )
         for position in range(matched.start(), matched.end()):
             covered[position] = 1
     if found:
@@ -322,8 +411,13 @@ def _extract_ing_items(segment: str, label: str) -> list[str]:
         found.sort(key=lambda pair: pair[0])
         items = [text for _position, text in found]
     else:
-        # 拆不出用量时整段保留，不丢信息（只收掉对齐用的字间空格）
-        items = [_join_aligned_chars(segment)]
+        # 拆不出用量时整段保留，不丢信息（只收掉对齐用的字间空格）。
+        # 但整段里挤着多味料、每味各带模糊用量时（书3 p73「米醋 适量 蒜水 适量」）
+        # 仍按模糊用量断开——末尾那个不动，见 _split_at_vague。
+        whole = _join_aligned_chars(segment)
+        pieces, tail = _split_at_vague(whole, cut_last=False)
+        tail = _join_aligned_chars(tail.strip().strip(_ING_RESIDUE_EDGE).strip())
+        items = [piece for piece in pieces + [tail] if piece] or [whole]
     if label:
         items[0] = f"{label}：{items[0]}"     # 组标签只出现在该组首条，与原书排版一致
     return items

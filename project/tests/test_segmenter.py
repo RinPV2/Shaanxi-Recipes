@@ -217,8 +217,12 @@ class AlignmentSpaceTests(unittest.TestCase):
     def test_field_separators_are_left_alone(self) -> None:
         # 这些空格是字段分隔，删掉就粘成一坨
         self.assertEqual(self._items("蒜苗 食盐"), ["蒜苗 食盐"])
-        self.assertEqual(self._items("米醋 适量 蒜水 适量"), ["米醋 适量 蒜水 适量"])
-        self.assertEqual(self._items("盐 适量 调料面 适量"), ["盐 适量 调料面 适量"])
+        # 一段里挤着两味料、各带自己的模糊用量 → 模糊用量就是断点，按两条收。
+        # （2026-07-29 之前整段留成一条，两味料在食材索引里都缺席。）
+        self.assertEqual(self._items("米醋 适量 蒜水 适量"), ["米醋 适量", "蒜水 适量"])
+        self.assertEqual(self._items("盐 适量 调料面 适量"), ["盐 适量", "调料面 适量"])
+        # 但两味料**共用**最后那一个用量时（原书就这么排）整段不动，不替谁配用量
+        self.assertEqual(self._items("食盐 味精 适量"), ["食盐 味精 适量"])
 
     def test_longer_single_char_runs_are_left_alone(self) -> None:
         # 三个以上连续单字是多栏名称被拆碎：「椒 草 果」是花椒+草果，
@@ -451,6 +455,71 @@ class UnpairedResidueTests(unittest.TestCase):
     def test_whole_segment_fallback_is_unchanged(self) -> None:
         # 一个 pair 都配不上时仍是整段保留，行为不变
         self.assertEqual(self._items("味 精 少许"), ["味精 少许"])
+
+
+class VagueQuantityBreakTests(unittest.TestCase):
+    """模糊用量（少许/适量/微量/少量/若干/酌量）也是「名称+用量」的断点。
+
+    第四册的原料表不是前三册那种两栏对齐网格，而是**横排流水文**：一行里连排多味料，
+    栏间只靠空白隔开。MinerU 把整行读成一块后，配对器只认「数词+量词」，
+    于是前一味料用模糊用量时那里断不开，「甲+量词+乙」整段被当成一个名字：
+      · 名字够短 → 索引里凭空多出一味假料（「盐少许粉面」，全库 13 处）；
+      · 名字超长 → 被 _clean_ingredient 的 6 字上限整条拒掉，其中的真食材连索引都没有
+        （「八角、桂皮少许水木耳水玉兰片适量草果」，全库 15 处）。
+    全库共 28 处（书3 3 处、书4 25 处），页图逐条核实过。
+    """
+
+    def _items(self, line: str) -> list[str]:
+        entries, _group = _split_ingredient_line(line, "ingredient")
+        return [item for _group_name, item in entries]
+
+    def test_vague_quantity_breaks_the_pair(self) -> None:
+        # 书4 p16 琉璃肉：原书「盐 少许　粉面 四两」
+        self.assertEqual(self._items("盐少许粉面 四两"), ["盐 少许", "粉面 四两"])
+        # 书4 p36 酱汁鱼：原书「菜油 适量　绍酒 一两」
+        self.assertEqual(self._items("菜油适量绍酒 一两"), ["菜油 适量", "绍酒 一两"])
+        # 一段里可以连着断两次（书4 p23 炸鹿尾：「面粉少许　白糖少许　芝麻油四钱」）
+        self.assertEqual(
+            self._items("面粉少许白糖少许芝麻油 四钱"),
+            ["面粉 少许", "白糖 少许", "芝麻油 四钱"],
+        )
+
+    def test_overlong_glue_is_split_so_its_real_ingredients_survive(self) -> None:
+        # 书4 p81 油焖腐竹，12× 页图核实过的原书一行：
+        # 「八角、桂皮少许　水木耳　水玉兰片适量　草果几个」——从前整段是一个名字，
+        # 超 6 字被拒，桂皮／水木耳／水玉兰片／草果 四味真食材连索引都没有。
+        self.assertEqual(
+            self._items("八角、桂皮少许水木耳 水玉兰片适量草果几个"),
+            ["八角、桂皮 少许", "水木耳 水玉兰片 适量", "草果 几个"],
+        )
+
+    def test_non_standard_measure_words_also_break(self) -> None:
+        # 「段」「厘」「头」是原书用过的表外量词（各 2 例，页图已核）
+        self.assertEqual(self._items("葱一段姜 一块"), ["葱 一段", "姜 一块"])
+        self.assertEqual(self._items("味精五厘绍酒 一钱"), ["味精 五厘", "绍酒 一钱"])
+        self.assertEqual(self._items("蒜两头葱段、姜各 二两"), ["蒜 两头", "葱段、姜各 二两"])
+        # 数词与量词之间容一个「大／小」（书1 p32 捶里脊片「紫菜 两小片」）
+        self.assertEqual(self._items("紫菜 两小片"), ["紫菜 两小片"])
+
+    def test_what_must_not_be_broken(self) -> None:
+        # ① 模糊用量打头 = 前一味料的用量被断到了本块开头，谁的不知道 → 不切
+        self.assertEqual(self._items("适量酱油 五钱"), ["适量酱油 五钱"])
+        # ② 括号里的模糊用量是工艺说明，不是本条用量 → 不切
+        self.assertEqual(
+            self._items("葱姜汁少许（用适量开水冲泡晾凉待用）"),
+            ["葱姜汁少许（用适量开水冲泡晾凉待用）"],
+        )
+        self.assertEqual(self._items("味 精 绍 酒 （适量）"), ["味 精 绍 酒 （适量）"])
+        # ③ 段里只有一个模糊用量时，它后面剩下的东西没有用量作凭据——
+        #    可能是下一味料（书3 p76「青油、糖色少许　葱花」的葱花），
+        #    也可能是散文尾巴（书3 p122「…等调料适量使用。」的「使用」）→ 一律不切
+        self.assertEqual(self._items("青油、糖色少许 葱花"), ["青油、糖色少许 葱花"])
+        self.assertEqual(
+            self._items("食盐、醋、酱油、花椒面、辣椒油等调料适量使用。"),
+            ["食盐、醋、酱油、花椒面、辣椒油等调料适量使用"],
+        )
+        # ④ 「对」故意没收进量词表：收了它，食材索引会把真食材「对虾」剥成「虾」
+        self.assertEqual(self._items("鸭腿五对"), ["鸭腿五对"])
 
 
 class ImpliedStepsBoundaryTests(unittest.TestCase):
