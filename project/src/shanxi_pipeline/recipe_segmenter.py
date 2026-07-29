@@ -247,9 +247,9 @@ _ING_RESIDUE_EDGE = "、，,。．.：:；;·…！!？?-－—‐~～"
 # 剥完必须还剩汉字/数字/字母才算内容。这一条挡掉全书 27 处行末孤立句号、
 # 「1.」这种步骤序号残片，以及 OCR 用来占位漏字的「▢」。
 _ING_RESIDUE_REAL = re.compile(r"[一-鿿0-9A-Za-z]")
-# 本书有 4 道菜（（八〇）糯米稍梅、（十三）黄桂油糕、（99）四季豆腐、（一）鳝鱼煮馍 一带）
-# 的「制法」标题整行没被 OCR 出来，整段做法散文留在原料区——那些行本来就已经
-# 产出一堆假条目（属上游分区缺陷，另案）。残余片段在这里会是半句话，
+# 「制法」标题整行没被 OCR 出来时，整段做法散文会留在原料区。这类行本来就已经
+# 产出一堆假条目——分区本身由 _implied_steps_start 补救，但补救不了的（页面残缺到
+# 连步骤序号都没有）仍会漏到这里。残余片段在这里会是半句话，
 # 灌进原料表只会更脏，所以这类片段只跳过收集，其它行为一概不变。
 # 判据：以步骤序号开头，或长段落里出现句中句号/分号——原书的原料行只在末尾带句号。
 _STEP_ENUM_HEAD = re.compile(r"^\s*\d+\s*[.、．]")
@@ -593,6 +593,75 @@ def _implied_ingredients_end(blocks: list[dict[str, Any]]) -> int:
     return 0
 
 
+# 原料区里出现的步骤序号（「1. 制皮面：…」）。必须是**裸**序号:
+# 「（1）干馍：」「（2）云云：」是「一菜两式」的子项标签（书3 p40/p41 兴平干馍和云云馍），
+# 它们也在原料区里,但后面跟的是各自的原料表而不是做法,误判会把整张原料表划给 steps。
+_IMPLIED_STEP_ENUM = re.compile(r"^\s*(\d+)\s*[.、．]")
+# 原料区里残缺的「二、×××：」章节头。本书的章节序号是固定的:一=原料、二=制法、三=特点,
+# 所以原料区里冒出来的「二、…」只可能是没被认出来的制法标题——
+# 书3 p23 黄桂油糕印的「二、制法：」几乎褪没,OCR 读成「二、制馅：」（与下一行的
+# 「1. 制馅：」串了行);书4 p83 四季豆腐印的「二、作法：」被读成「二、你法：」。
+_IMPLIED_STEPS_HEAD = re.compile(r"^[二2]\s*[、，,．.。:：]\s*(?P<name>[^\s]{1,4}?)[：:。.]?$")
+_HAN = re.compile(r"[一-鿿]")
+
+
+def _is_implied_steps_head(text: str) -> bool:
+    matched = _IMPLIED_STEPS_HEAD.match(text)
+    if not matched:
+        return False
+    name = matched.group("name")
+    # 章节名是纯汉字词（制法/作法/你法/制馅…）。要求全汉字挡掉「二、三钱」这种
+    # 用量残片,要求至少一个字不是数词/量词挡掉「二、三四」这种编号串。
+    return all(_HAN.match(char) for char in name) and any(
+        char not in _ING_NUM + _ING_UNIT for char in name
+    )
+
+
+def _implied_steps_start(blocks: list[dict[str, Any]]) -> tuple[int, bool]:
+    """「制法」标题整行没被 OCR 出来时,推断 steps 区的起点。
+
+    返回 `(下标, 该块本身是不是标题)`;下标 0 表示不推断。整段做法散文留在原料区的后果是
+    steps 为空、原料表里塞着半截句子（书3 p89 糯米稍梅、书3 p23 黄桂油糕、书4 p83 四季豆腐）。
+
+    只在**本条完全没有可识别的制法标题**时才推断,并且只认两种硬信号:
+      ① 原料区里有残缺的「二、×××：」章节头 → 它就是制法标题（见 _IMPLIED_STEPS_HEAD）;
+      ② 原料区里出现裸步骤序号,且从 1 开始逐个递增 → 第一条就是 steps 的起点。
+    另要求边界之前还剩至少一块原料区内容,免得把整条原料表划给 steps。
+    """
+    section = "ingredients" if _implied_ingredients_end(blocks) else "other"
+    ingredient_blocks = 0
+    header_index = -1
+    numbered: list[tuple[int, int]] = []
+    for index, block in enumerate(blocks):
+        text = normalize_text(block.get("text", ""))
+        if not text or is_recipe_title(text):
+            continue
+        matched_section, _remainder = _match_section_header(text)
+        if matched_section is not None:
+            if matched_section == "steps":
+                return 0, False       # 制法标题在,不需要推断
+            section = matched_section
+            continue
+        if section != "ingredients":
+            continue
+        if header_index < 0 and not numbered and _is_implied_steps_head(text):
+            header_index = index
+            continue
+        if header_index < 0:
+            if _IMPLIED_STEP_ENUM.match(text):
+                numbered.append((index, int(_IMPLIED_STEP_ENUM.match(text).group(1))))
+            else:
+                ingredient_blocks += 1
+
+    if not ingredient_blocks:
+        return 0, False
+    if header_index >= 0:
+        return header_index, True
+    if numbered and all(number == order + 1 for order, (_index, number) in enumerate(numbered)):
+        return numbered[0][0], False
+    return 0, False
+
+
 def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[ReviewItem]]:
     ingredients: list[str] = []
     seasonings: list[str] = []
@@ -602,6 +671,7 @@ def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[Review
     review_items: list[ReviewItem] = []
 
     implied_end = _implied_ingredients_end(active.blocks)
+    implied_steps, implied_steps_is_head = _implied_steps_start(active.blocks)
     current_section = "ingredients" if implied_end else "other"
     ingredient_group = "ingredient"   # 原料区内的当前分组，供无标签续行继承
     for index, block in enumerate(active.blocks):
@@ -610,6 +680,10 @@ def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[Review
             continue
         if is_recipe_title(text):
             continue
+        if implied_steps and index == implied_steps:
+            current_section = "steps"
+            if implied_steps_is_head:
+                continue      # 这一块就是残缺的制法标题，本身不是步骤内容
         matched_section, remainder = _match_section_header(text)
         if matched_section:
             current_section = matched_section

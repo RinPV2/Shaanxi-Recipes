@@ -413,6 +413,8 @@ class UnpairedResidueTests(unittest.TestCase):
     def test_residue_before_the_first_pair_takes_the_group_label(self) -> None:
         # 书1 p161 煨鱿鱼丝：OCR 在名称与用量之间插了个「·」，配对从「一斤…」重启，
         # 「肥瘦生猪肉」原先整块消失。它是本行第一条，组标签要挂在它头上。
+        # （这一处杂点现已由 cleaning_rules 的「汉字·数词」规则在上游剥掉，
+        #   本例守的是配对器自身在遇到任何未清洗杂点时的下限。）
         self.assertEqual(
             self._items("配料：肥瘦生猪肉·一 斤 鸡大腿 二个"),
             ["配料：肥瘦生猪肉", "一斤鸡大腿 二个"],
@@ -440,11 +442,120 @@ class UnpairedResidueTests(unittest.TestCase):
         )
 
     def test_step_prose_in_the_ingredient_region_is_not_harvested(self) -> None:
-        # 有 4 道菜的「制法」标题整行没被 OCR 出来，整段做法留在原料区（上游分区缺陷，
-        # 另案）。那些行本来就已产出假条目，残余是半句话，不该再往原料表里灌句子。
+        # 「制法」标题整行没被 OCR 出来时整段做法会留在原料区。分区本身由
+        # _implied_steps_start 补救（见 ImpliedStepsBoundaryTests），这里守的是补救不到时
+        # 的下限：那些行会产出假条目，残余是半句话，不该再往原料表里灌句子。
         line = "1. 豆腐切五分见方的小块，冬笋去皮洗净，开水焯过；炒勺座大火上，倒入柴油二斤(实耗二两)，油热八成"
         self.assertEqual(self._items(line), ["豆腐切 五分", "倒入柴油 二斤(实耗二两)"])
 
     def test_whole_segment_fallback_is_unchanged(self) -> None:
         # 一个 pair 都配不上时仍是整段保留，行为不变
         self.assertEqual(self._items("味 精 少许"), ["味精 少许"])
+
+
+class ImpliedStepsBoundaryTests(unittest.TestCase):
+    """「制法」标题整行没被 OCR 出来时，整段做法散文会留在原料区，steps 变成空。
+
+    全库 3 道：书3 p89 糯米稍梅（标题完全没读出）、书3 p23 黄桂油糕（褪成「二、制馅：」）、
+    书4 p83 四季豆腐（读成「二、你法：」）。页图已逐条核对。
+    """
+
+    book = BookEntry(
+        book_id="sxcp-3",
+        series=3,
+        file_name="陕西菜谱3.pdf",
+        file_path="C:/hobby/Shanxi/陕西菜谱3.pdf",
+        mineru_json="C:/hobby/Shanxi/example.json",
+        status="ready",
+        enabled=True,
+    )
+
+    def _page(self, blocks: list[dict], local_page: int = 89) -> NormalizedPage:
+        return NormalizedPage(
+            book_id="sxcp-3",
+            book_file="陕西菜谱3.pdf",
+            series=3,
+            local_page=local_page,
+            source_pdf_path=self.book.file_path,
+            source_json_path=self.book.mineru_json,
+            raw_text="",
+            cleaned_text="\n".join(block["text"] for block in blocks),
+            text_blocks=blocks,
+            title_candidates=[blocks[0]["text"]],
+            structure_hints={"page_kind": "recipe"},
+            ocr_engine="mineru",
+            confidence="high",
+            warnings=[],
+            review_needed=False,
+        )
+
+    def test_bare_step_enumerator_starting_at_one_opens_the_steps_section(self) -> None:
+        # 书3 p89/p90 糯米稍梅：p90 页首的「二、制法：」整行没被 OCR 出来。
+        blocks = [
+            {"block_type": "title", "text": "（八〇）糯米稍梅"},
+            {"block_type": "title", "text": "一、原料："},
+            {"block_type": "text", "text": "富强粉 三斤 糯米 二斤"},
+            {"block_type": "text", "text": "绍酒 一两"},
+            {"block_type": "text", "text": "1. 制皮面：先取面粉一斤放盆内，倒入滚水五两，揉成面团。"},
+            {"block_type": "text", "text": "2. 制馅：肋条肉切成二分大的小方丁，加水一两上笼蒸约二十分钟。"},
+            {"block_type": "text", "text": "3. 成型蒸制：左手托面皮，拨入馅子，旺火蒸约十分钟即熟。"},
+        ]
+        recipes, _fallbacks, _reviews = segment_book(self.book, [self._page(blocks)])
+        self.assertEqual(1, len(recipes))
+        recipe = recipes[0]
+        self.assertEqual(["富强粉 三斤", "糯米 二斤", "绍酒 一两"], recipe.ingredients)
+        self.assertEqual(3, len(recipe.steps))
+        self.assertTrue(recipe.steps[0].startswith("1. 制皮面"))
+        self.assertTrue(recipe.steps[-1].startswith("3. 成型蒸制"))
+
+    def test_garbled_section_two_head_is_treated_as_the_steps_title(self) -> None:
+        # 一=原料、二=制法、三=特点是全书固定的章节编号，所以原料区里的「二、×××：」
+        # 只可能是没被认出来的制法标题（书3 p23「二、制馅：」、书4 p83「二、你法：」）。
+        blocks = [
+            {"block_type": "title", "text": "（十三）黄桂油糕"},
+            {"block_type": "title", "text": "一、原料："},
+            {"block_type": "text", "text": "面粉 二十斤 菜籽油 五斤(实耗)"},
+            {"block_type": "text", "text": "青红丝 一两 黄桂 三两"},
+            {"block_type": "text", "text": "二、制馅："},
+            {"block_type": "text", "text": "将桃仁、桔饼、青梅切碎，与白糖、青红丝、黄桂混合，"},
+            {"block_type": "text", "text": "再加菜籽油一斤、熟面粉半斤，用力揉搓均匀后，放在盆里待用。"},
+            {"block_type": "text", "text": "2. 烫面，清水半锅用旺火烧开，将面粉十八斤分次倒入。"},
+        ]
+        recipes, _fallbacks, _reviews = segment_book(self.book, [self._page(blocks, 23)])
+        recipe = recipes[0]
+        self.assertEqual(
+            ["面粉 二十斤", "菜籽油 五斤(实耗)", "青红丝 一两", "黄桂 三两"], recipe.ingredients
+        )
+        # 残缺的标题本身不是步骤内容
+        self.assertNotIn("二、制馅：", recipe.steps)
+        self.assertEqual(3, len(recipe.steps))
+        self.assertTrue(recipe.steps[0].startswith("将桃仁"))
+
+    def test_existing_steps_header_disables_the_inference(self) -> None:
+        blocks = [
+            {"block_type": "title", "text": "（一）猪肉小炒"},
+            {"block_type": "title", "text": "一、原料："},
+            {"block_type": "text", "text": "猪肉 一斤"},
+            {"block_type": "title", "text": "二、制法："},
+            {"block_type": "text", "text": "1. 炒熟。"},
+        ]
+        recipes, _fallbacks, _reviews = segment_book(self.book, [self._page(blocks, 9)])
+        self.assertEqual(["猪肉 一斤"], recipes[0].ingredients)
+        self.assertEqual(["1. 炒熟。"], recipes[0].steps)
+
+    def test_parenthesised_sub_labels_do_not_open_a_steps_section(self) -> None:
+        # 书3 p40/p41 兴平干馍和云云馍 是一菜两式：「（1）干馍：」「（2）云云：」是原料区
+        # 里的子项标签，后面跟的是各自的原料表。误判成步骤会把整张原料表划给 steps。
+        blocks = [
+            {"block_type": "title", "text": "（三二）兴平干馍和云云馍"},
+            {"block_type": "title", "text": "一、原料："},
+            {"block_type": "title", "text": "（1）干馍："},
+            {"block_type": "text", "text": "面粉 一斤 碱面 二钱"},
+            {"block_type": "text", "text": "（2）云云："},
+            {"block_type": "text", "text": "面粉 一斤 白糖 四两"},
+        ]
+        recipes, _fallbacks, _reviews = segment_book(self.book, [self._page(blocks, 40)])
+        recipe = recipes[0]
+        self.assertEqual([], recipe.steps)
+        self.assertIn("面粉 一斤", recipe.ingredients)
+        self.assertEqual(2, recipe.ingredients.count("面粉 一斤"))

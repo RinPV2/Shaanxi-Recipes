@@ -160,3 +160,71 @@ class TitleOverrideExtractionTests(unittest.TestCase):
         from shanxi_pipeline.review_priority import _extract_page_title_override
 
         self.assertEqual("烧肚裆", _extract_page_title_override("（七四） 烧肚裆"))
+
+
+class PlaceholderIngredientTests(unittest.TestCase):
+    """「▢」是校对员给认不出的字留的占位符，不清洗、不猜字，只当校对信号往上报。
+
+    落在原料区的占位符最要紧：书2 p102「▢淀粉 二钱」实为湿淀粉，
+    书1 p75「菜籽油 ▢钱」、书2 p103「葱段 ▢钱」缺的是用量。
+    """
+
+    def _page(self, book_id: str, local_page: int, blocks: list[dict]) -> dict:
+        return {
+            "book_id": book_id,
+            "local_page": local_page,
+            "confidence": "high",
+            "warnings": [],
+            "title_candidates": [],
+            "structure_hints": {"page_kind": "recipe"},
+            "text_blocks": blocks,
+        }
+
+    def test_only_placeholders_inside_the_ingredient_region_are_collected(self) -> None:
+        from shanxi_pipeline.review_priority import _placeholder_ingredient_lines
+
+        pages = [
+            self._page(
+                "sxcp-2",
+                102,
+                [
+                    {"block_type": "title", "text": "（五〇）熬炒子鸡"},
+                    {"block_type": "title", "text": "一、原料："},
+                    {"block_type": "text", "text": "▢淀粉 二钱"},
+                    {"block_type": "title", "text": "二、制法："},
+                    {"block_type": "text", "text": "1. 形状▢▢（原书墨迹模糊）。"},
+                ],
+            )
+        ]
+        found = _placeholder_ingredient_lines(pages)
+        self.assertEqual({("sxcp-2", 102): ["▢淀粉 二钱"]}, found)
+
+    def test_placeholder_page_is_lifted_out_of_safe_to_skip(self) -> None:
+        page = {
+            "book_id": "sxcp-1",
+            "local_page": 75,
+            "confidence": "high",
+            "warnings": [],
+            "title_candidates": ["（六四）棋盘肉"],
+            "structure_hints": {"page_kind": "recipe"},
+        }
+        base = _classify_page(
+            page=page,
+            recipe_anchors=[{"title": "棋盘肉"}],
+            expected_toc_entries=[],
+            confirmation={"confirmed": True},
+            title_override=None,
+        )
+        self.assertEqual("safe_to_skip", base["bucket"])
+
+        flagged = _classify_page(
+            page=page,
+            recipe_anchors=[{"title": "棋盘肉"}],
+            expected_toc_entries=[],
+            confirmation={"confirmed": True},
+            title_override=None,
+            placeholder_lines=["味精 二分 菜籽油 ▢钱"],
+        )
+        self.assertEqual("optional_sample", flagged["bucket"])
+        self.assertFalse(flagged["reasons"])
+        self.assertTrue(any("placeholder" in note for note in flagged["notes"]))

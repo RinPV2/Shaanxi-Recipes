@@ -9,6 +9,7 @@ from typing import Any
 
 from .confirmation_reader import parse_confirmation_source
 from .manifest import load_books
+from .recipe_segmenter import _ingredient_region_mask
 from .utils import is_plausible_dish_title, normalize_text, write_json, write_text
 
 PAGE_REF_RE = re.compile(r"[（(]\s*(?P<page>\d+)\s*[.)）]")
@@ -198,6 +199,41 @@ def _load_pages(context, requested_ids: list[str] | None) -> tuple[list[dict[str
     return rows, lookup
 
 
+# OCR / 校对记录里给「印不清、认不出的字」留的占位符。它不是脏字,**不能清洗掉**:
+# 「▢淀粉 二钱」（书2 p102）实为湿淀粉,「菜籽油 ▢钱」（书1 p75）「葱段 ▢钱」（书2 p103）
+# 缺的是数词。替换成任何具体字都是编数据,所以只能当成校对信号往上报。
+# 落在**原料区**的占位符最要紧:那里缺的往往正是用量,成品库会出现没有分量的原料。
+PLACEHOLDER_CHARS = "▢□"
+
+
+def _placeholder_ingredient_lines(pages: list[dict[str, Any]]) -> dict[tuple[str, int], list[str]]:
+    """找出「原料区含占位符」的页,返回 {(册, 页): [涉及的原文行]}。
+
+    原料区的判定直接借用分段器的 `_ingredient_region_mask`,与成品库口径一致;
+    原料区会跨页,所以状态要按册在页序上传递（与 segment_book 同）。
+    """
+    by_book: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for page in pages:
+        by_book[page["book_id"]].append(page)
+
+    found: dict[tuple[str, int], list[str]] = {}
+    for book_id, book_pages in by_book.items():
+        carry = False
+        for page in sorted(book_pages, key=lambda item: int(item["local_page"])):
+            blocks = [
+                block for block in page.get("text_blocks", []) if normalize_text(block.get("text", ""))
+            ]
+            mask, carry = _ingredient_region_mask(blocks, carry)
+            hits = [
+                normalize_text(block["text"])
+                for block, in_ingredients in zip(blocks, mask)
+                if in_ingredients and any(char in block["text"] for char in PLACEHOLDER_CHARS)
+            ]
+            if hits:
+                found[(book_id, int(page["local_page"]))] = hits
+    return found
+
+
 def _load_recipe_page_map(context, requested_ids: list[str] | None) -> dict[tuple[str, int], list[dict[str, Any]]]:
     recipe_map: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
     wanted = set(requested_ids or [])
@@ -372,6 +408,7 @@ def _classify_page(
     expected_toc_entries: list[dict[str, Any]],
     confirmation: dict[str, Any] | None,
     title_override: str | None,
+    placeholder_lines: list[str] | None = None,
 ) -> dict[str, Any]:
     page_kind = page.get("structure_hints", {}).get("page_kind", "")
     warnings = list(page.get("warnings", []))
@@ -379,12 +416,18 @@ def _classify_page(
     expected_toc_count = len(expected_toc_entries)
     confirmed = bool(confirmation and confirmation.get("confirmed"))
 
+    placeholder_lines = list(placeholder_lines or [])
+
     reasons: list[str] = []
     notes: list[str] = []
     severe = False
 
     if confirmed:
         notes.append("confirmed by user review")
+    if placeholder_lines:
+        notes.append(
+            "unreadable-glyph placeholder in ingredient region: " + " / ".join(placeholder_lines)
+        )
     if title_override:
         notes.append(f"title override available: {title_override}")
     if expected_toc_count:
@@ -446,6 +489,11 @@ def _classify_page(
     else:
         bucket = "safe_to_skip"
 
+    # 占位符是校对员**主动**标下的「这个字认不出」,所以这些页往往已经确认过、
+    # 本来会被判成可跳过。这里把它们至少提到「建议复核」档,免得缺用量的原料悄悄进库。
+    if placeholder_lines and bucket == "safe_to_skip":
+        bucket = "optional_sample"
+
     return {
         "book_id": page["book_id"],
         "local_page": int(page["local_page"]),
@@ -459,6 +507,7 @@ def _classify_page(
         "reasons": reasons,
         "notes": notes,
         "warnings": warnings,
+        "placeholder_ingredient_lines": placeholder_lines,
         "title_candidates": page.get("title_candidates", []),
     }
 
@@ -478,6 +527,8 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
         if not entry.get("category")
     )
 
+    placeholder_map = _placeholder_ingredient_lines(pages)
+
     bucketed: dict[str, list[dict[str, Any]]] = {
         "must_review": [],
         "optional_sample": [],
@@ -495,6 +546,7 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
             expected_toc_entries=toc_map[page["book_id"]].get(int(page["local_page"]), []),
             confirmation=confirmation_map.get(key),
             title_override=title_override_map[page["book_id"]].get(int(page["local_page"])),
+            placeholder_lines=placeholder_map.get(key),
         )
         bucketed[row["bucket"]].append(row)
         per_book_counts[row["book_id"]][row["bucket"]] += 1
@@ -525,6 +577,8 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
             "toc_entries_without_category": confirmation_stats["toc_entries_without_category"],
             "title_overrides": confirmation_stats["title_overrides"],
             "multi_anchor_pages": len(multi_anchor_pages),
+            "placeholder_ingredient_pages": len(placeholder_map),
+            "placeholder_ingredient_lines": sum(len(lines) for lines in placeholder_map.values()),
         },
         "per_book": {
             book_id: {
@@ -549,6 +603,10 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
             }
             for book_id, page_map in sorted(title_override_map.items())
         },
+        "placeholder_ingredient_pages": [
+            {"book_id": book_id, "local_page": local_page, "lines": lines}
+            for (book_id, local_page), lines in sorted(placeholder_map.items())
+        ],
     }
 
     json_path = context.work_root / "reports" / "review_priority.json"
@@ -574,6 +632,9 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
         f"- 锚点缺分类: {report['summary']['toc_entries_without_category']}",
         f"- 已提取单页标题修正: {report['summary']['title_overrides']}",
         f"- 已识别多菜谱锚点页: {report['summary']['multi_anchor_pages']}",
+        f"- 原料区含不可识字占位符（{PLACEHOLDER_CHARS}）的页: "
+        f"{report['summary']['placeholder_ingredient_pages']}"
+        f"（共 {report['summary']['placeholder_ingredient_lines']} 行）",
         "",
         "## 分书统计",
     ]
@@ -592,8 +653,16 @@ def build_review_priority_report(context, requested_ids: list[str] | None = None
             "- 如果同页存在多个菜谱起始锚点，或目录明确说明该页有多个菜名起始，则记为多菜谱锚点页，降为可抽查。",
             "- continuation 页如果已经被现有 recipe candidate 覆盖，不再自动列为必看。",
             "- 已确认目录页提取出的菜名和页码会写入锚点映射，用于后续菜谱到图片的页级链接依据。",
+            f"- 原料区里出现 `{PLACEHOLDER_CHARS}`（不可识字占位符）的页一律至少降为可抽查："
+            "占位符常常正好占着用量的位置，成品库会出现没有分量的原料。占位符本身不清洗、不猜字。",
         ]
     )
+
+    if report["placeholder_ingredient_pages"]:
+        lines.extend(["", f"## 原料区含不可识字占位符（{PLACEHOLDER_CHARS}）"])
+        for row in report["placeholder_ingredient_pages"]:
+            for line in row["lines"]:
+                lines.append(f"- {row['book_id']} p.{row['local_page']:04d}: {line}")
 
     if report["title_override_map"]:
         lines.extend(["", "## 已知标题修正"])
