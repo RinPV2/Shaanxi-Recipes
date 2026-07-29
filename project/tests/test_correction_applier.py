@@ -184,6 +184,18 @@ class ReplaceLineTests(unittest.TestCase):
         self.assertEqual(page.text_blocks[0]["block_type"], "title")
         self.assertIn("（一〇四）熬炒子鸡", page.title_candidates)
 
+    def test_replace_promotes_title_numbered_with_white_circle(self) -> None:
+        # 编号里的「○」(U+25CB) 必须在 normalize_text 阶段就归一成「〇」(U+3007)：
+        # block_type 在这里定，早于 normalize_page 应用 cleaning_rules.text_replacements，
+        # 而 find_recipe_title_positions 只看 title 块——此处判错就再也救不回来。
+        page = make_page(
+            [{"block_type": "text", "text": "（一）八奶汤锅子鱼", "bbox": None, "index": 0}]
+        )
+        result = apply_correction(page, "【替行:（一）八奶汤锅子鱼】（一○八）奶汤锅子鱼")
+        self.assertEqual(result["patched"], 1)
+        self.assertEqual(page.text_blocks[0]["block_type"], "title")
+        self.assertIn("（一〇八）奶汤锅子鱼", page.title_candidates)
+
     def test_replace_unmatched_when_anchor_absent(self) -> None:
         page = make_page([{"block_type": "text", "text": "毫不相干的文字", "bbox": None, "index": 0}])
         result = apply_correction(page, "【替行:完全找不到的锚文本内容】新的正确文字")

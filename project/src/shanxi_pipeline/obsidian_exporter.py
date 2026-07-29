@@ -30,10 +30,17 @@ _NUM_HEAD_OK = {"八角", "五花肉", "五花猪肉", "五花牛肉", "五花�
                 "三鲜", "千张", "百合", "十三香", "八宝", "四季豆", "一级羊肉"}
 # 剥离量词后可能剩下的无意义单字
 _BAD_SINGLE = {"角", "麻", "分", "子", "头", "皮", "水", "色"}
+# 括号注剥掉后名称尾巴上会留下量词修饰残字：「活鲤鱼（一条）约 二斤」→「活鲤鱼约」、
+# 「甲鱼重（2-3斤） 一个」→「甲鱼重」。不剥掉，食材索引里就会多出
+# 「活鲤鱼」「活鲤鱼约」这种分裂条目（与 硷→碱 归一要避免的是同一类问题）。
+# 尾字前至少留两个字才剥：「蒸约」「煮约」「碱约」这类误入原料区的制法碎片
+# 剥完只剩一个字，比原样更像正经食材条目（括号注在 _extract_terms 里已按行剥掉，
+# 到这里看不出名称原本有没有括号，只能按剥完的长度判）。
+_TAIL_QUALIFIER = re.compile(r"(?<=..)[约重]+$")
 
 
 def _clean_ingredient(name: str) -> str | None:
-    name = _PAREN.sub("", name).strip("、 ")
+    name = _TAIL_QUALIFIER.sub("", _PAREN.sub("", name).strip("、 ")).strip("、 ")
     if not name or len(name) > 6:
         return None
     if not all("一" <= char <= "鿿" or char == "、" for char in name):

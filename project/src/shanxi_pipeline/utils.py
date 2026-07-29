@@ -15,6 +15,19 @@ import yaml
 INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1F]')
 WHITESPACE = re.compile(r"\s+")
 
+# MinerU 把原书的「〇」(U+3007 IDEOGRAPHIC NUMBER ZERO) 时而读成几何符号「○」(U+25CB)：
+# 字形几乎一样，码位不同。菜名编号里只要出现一次，is_recipe_title / strip_recipe_enumerator /
+# page_normalizer.RECIPE_ENUMERATOR 的数字字符类就匹配不到，那道菜不再算标题，
+# 整篇被上一道菜吞掉（（一○八）奶汤锅子鱼、（一一○）清汤鱼丸、（七○）锅烧羊肉、
+# （一○八）花生辣鸡丁；书3 的（四○）大肉饼、（一○八）宝鸡油茶已被校对员逐页手工绕过）。
+#
+# 必须放在 normalize_text 而不是 cleaning_rules.text_replacements 里：correction_applier
+# 早于 normalize_page（= 应用 text_replacements 的地方）就要用 is_recipe_title 判定
+# block_type，那时替换规则还没跑，校对写回的正确菜名依旧被定成 text 块；
+# 而 find_recipe_title_positions 只看 title 块，之后再替换也救不回来。
+# 这属于同形异码归一（与本函数已有的 U+3000→空格 同类），不是原书用字取舍。
+_ZERO_LOOKALIKES = str.maketrans({"○": "〇", "◯": "〇"})
+
 
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
@@ -63,6 +76,7 @@ def sha256_file(path: Path) -> str:
 def normalize_text(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\u3000", " ").replace("\t", " ")
+    text = text.translate(_ZERO_LOOKALIKES)
     lines = [WHITESPACE.sub(" ", line).strip() for line in text.split("\n")]
     compact = "\n".join(line for line in lines if line)
     compact = re.sub(r"\n{3,}", "\n\n", compact)

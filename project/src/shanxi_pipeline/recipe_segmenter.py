@@ -118,10 +118,32 @@ def _append_to_active(active: ActiveRecipe, page: NormalizedPage, blocks: list[d
     )
 
 
-# 原书用量：数字串 + 单位（+「半」）。与 obsidian_exporter 中的口径保持一致。
+# 原书用量：数字串 + 单位（+「半」）。字符表与 obsidian_exporter 中的口径保持一致。
 _ING_NUM = "〇零一二三四五六七八九十百半两几"
 _ING_UNIT = "钱两斤分个只片粒条张朵克根块付副枚棵把碗匙勺撮"
-_ING_PAIR = re.compile(rf"([一-鿿、（）()]+?)([{_ING_NUM}]+[{_ING_UNIT}]半?)")
+# 成对括号注。原书括号里既有工艺说明（（去皮）（切细丝）（实耗）），也有用量说明
+# （（一条）（约二斤）（2-3斤）（约100条）），全角半角还常混排（「绿叶菜(洗净）」）。
+# 允许嵌一层：「红薯一斤半（山药、扁（豌）豆粉亦可）」只认内层会把外层整段漏掉。
+_ING_PAREN = re.compile(r"[（(](?:[^（()）]|[（(][^（()）]*[）)])*[）)]")
+# 括号注在配对时整体缩成一个占位字符（见 _mask_parens）：括号里的用量因此不可能
+# 被当成本条的用量。旧实现把「（」「）」当普通名称字符，于是括号内的用量会截断配对——
+# 「活鲤鱼（一条）约二斤」切成「活鲤鱼（ 一条」+「）约 二斤」，全书 72 处；
+# 「甲鱼 重（2-3斤）一个」更惨：2-3 不是汉字，扫描从括号后重启，名称只剩「斤）」。
+_ING_MASK = "\x00"
+# 用量可以是复合的：原书写「面粉 二斤五两」「食盐 一两一钱」「猪肉 三斤半」。
+# 旧正则一次只吃一个「数字串+单位」，于是「面粉 二斤五两 猪板油 一斤」被切成
+# 「面粉 二斤」+「五两猪板油 一斤」——被丢下的「五两」黏成了下一味原料的名字
+# （（七四）渭南时辰包子）。因此量词组要允许连续出现。
+# 用量后面还可以跟一个括号注（「猪前肘一斤（一个）」「面粉 十斤（其中酵面二斤）」），
+# 不在这里收住，尾括号就会变成下一条的开头（「（ 一个」）。
+# 中间容一个 OCR 杂点（「小 曲 一两. (暑季用曲量为七钱)」的句点），但标点只在
+# 确实跟着括号注时才吃——否则「A 二钱、B（切碎）三钱」会把顿号并进 A 的用量。
+# 这里与 obsidian_exporter._PAIR 有意不同：那边只取名字喂食材索引，
+# 多余的前导用量由 _clean_ingredient 事后剥掉，本函数则要原样保留用量串。
+_ING_QTY = rf"(?:[{_ING_NUM}]+[{_ING_UNIT}]半?)+(?:[.．。、，,]?{_ING_MASK})?"
+# 名称里仍收裸括号：OCR 截断的「配料：白菜心（或」没有成对括号可掩，
+# 不收就整行匹配不上、退化成一条。
+_ING_PAIR = re.compile(rf"([一-鿿、（）(){_ING_MASK}]+?)({_ING_QTY})")
 # 标签后面必须是分隔符、空白或行尾。原书的分隔符是「：」，OCR 常读成「；」「，」「·」「。」，
 # 所以不能只认冒号；但也不能像原先那样让分隔符整个可省——那样「调料面 二分」
 # （五香调料面，是一味原料）会被当成「调料：面 二分」，把它后面继承分组的续行
@@ -137,19 +159,81 @@ def _clean_ing_name(name: str) -> str:
     return re.sub(r"\s+", "", name).strip("、 ")
 
 
+def _join_aligned_chars(segment: str) -> str:
+    """合并原书为对齐插入的字间空格：「味 精 少许」→「味精 少许」。
+
+    只用于拆不出用量、整段保留的片段——配对成功的条目其名称已由
+    _clean_ing_name 收过空格。这里不能像那样一律删空格：整段保留的片段常常
+    还带着字段分隔（「蒜苗 食盐」是两味料、「米醋 适量 蒜水 适量」是两组名称+用量），
+    删光就粘成一坨。只合并「恰好两个连续单字」：
+      · 单字与多字之间的空格是字段分隔，动了「盐 适量」会并成「盐适量」；
+      · 三个以上连续单字在本书实测都是多栏名称被拆碎（「椒 草 果」是花椒+草果、
+        「味 精 绍 酒」是味精+绍酒），合并只会把不同名称粘在一起。
+    原书名称以两字为主，对齐时插一个空格，正好落在这条规则里。
+    """
+    merged: list[str] = []
+    run: list[str] = []
+
+    def flush() -> None:
+        if len(run) == 2:
+            merged.append("".join(run))
+        else:
+            merged.extend(run)
+        run.clear()
+
+    for token in segment.split():
+        if len(token) == 1:
+            run.append(token)
+            continue
+        flush()
+        merged.append(token)
+    flush()
+    return " ".join(merged)
+
+
+def _mask_parens(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """把每个成对括号注压成一个占位字符，便于按「名称 用量」配对。
+
+    同时返回占位串每个字符对应的原文区间，配对完按区间取回原文——
+    不用「先替换再还原」，是因为未被任何条目吃掉的括号注会让还原序错位。
+    """
+    masked: list[str] = []
+    spans: list[tuple[int, int]] = []
+    position = 0
+    for matched in _ING_PAREN.finditer(text):
+        for index in range(position, matched.start()):
+            masked.append(text[index])
+            spans.append((index, index + 1))
+        masked.append(_ING_MASK)
+        spans.append(matched.span())
+        position = matched.end()
+    for index in range(position, len(text)):
+        masked.append(text[index])
+        spans.append((index, index + 1))
+    return "".join(masked), spans
+
+
+def _unmask(text: str, spans: list[tuple[int, int]], start: int, end: int) -> str:
+    """取回占位串 [start, end) 对应的原文（含被压掉的括号注）。"""
+    return text[spans[start][0]:spans[end - 1][1]]
+
+
 def _extract_ing_items(segment: str, label: str) -> list[str]:
     """把一个（可能带组标签的）原料片段拆成若干「名称 用量」条目。"""
     segment = segment.strip("：: ")
     if not segment:
         return []
     body = re.sub(r"\s+", "", segment)
-    items = [
-        f"{_clean_ing_name(m.group(1))} {m.group(2)}"
-        for m in _ING_PAIR.finditer(body)
-        if _clean_ing_name(m.group(1))
-    ]
+    masked, spans = _mask_parens(body)
+    items = []
+    for matched in _ING_PAIR.finditer(masked):
+        name = _clean_ing_name(_unmask(body, spans, *matched.span(1)))
+        if not name:
+            continue
+        items.append(f"{name} {_unmask(body, spans, *matched.span(2))}")
     if not items:
-        items = [segment]                     # 拆不出用量时整段保留，不丢信息
+        # 拆不出用量时整段保留，不丢信息（只收掉对齐用的字间空格）
+        items = [_join_aligned_chars(segment)]
     if label:
         items[0] = f"{label}：{items[0]}"     # 组标签只出现在该组首条，与原书排版一致
     return items
@@ -346,8 +430,14 @@ def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[Review
         local_pages=pages,
         source_pdf=active.source_pdf,
         source_json=active.source_json,
-        ingredients=list(dict.fromkeys(ingredients)),
-        seasonings=list(dict.fromkeys(seasonings)),
+        # 原料/调料不去重：原书的原料表本来就会把同一味料列两次——渭南时辰包子的
+        # 「葱 二斤」分皮面与肉馅两栏，兴平干馍和云云馍 一菜两式各列一份「面粉 一斤」。
+        # 更要紧的是 MinerU 会把两栏表拆成「每格一块」（鱼香猪肝：主料：净猪肝／四两／
+        # 配料：泡辣椒／二钱／调料：葱花／二钱…），用量格自成一条；按字符串去重会把
+        # 重复的「二钱」合并，名称与用量的先后配对随之报废。
+        # 制法/特点仍去重：那是连续文字，逐字重复只可能是同一块被并进来两次。
+        ingredients=ingredients,
+        seasonings=seasonings,
         steps=list(dict.fromkeys(steps)),
         tips=list(dict.fromkeys(tips)),
         raw_excerpt=raw_excerpt,
