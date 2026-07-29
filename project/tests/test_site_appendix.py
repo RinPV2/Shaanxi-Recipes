@@ -209,10 +209,14 @@ class HomeEntryTests(unittest.TestCase):
         self.assertNotIn('class="promo"', html)
 
     def test_topbar_link_is_depth_aware(self):
+        # 只锁「深度前缀正确」，不锁 nav 内的排列次序——加「食材索引」入口后
+        # 它排在附录之前，原先的 '<nav><a href=…' 前缀断言会误报。
         recipe_html = site_builder.render_appendix_page(make_page(), "")
-        self.assertIn('<nav><a href="../appendix/index.html">', recipe_html)
+        self.assertIn('<nav>', recipe_html)
+        self.assertIn('href="../appendix/index.html"', recipe_html)
         home_html = site_builder.render_index_page([], [], [])
-        self.assertIn('<nav><a href="appendix/index.html">', home_html)
+        self.assertIn('<nav>', home_html)
+        self.assertIn('href="appendix/index.html"', home_html)
 
 
 class BuildSiteAppendixTests(unittest.TestCase):

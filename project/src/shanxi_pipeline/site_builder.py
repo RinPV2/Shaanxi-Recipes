@@ -32,6 +32,8 @@ UNCATEGORIZED = "未分类"
 # 与原书印刷页码差约 10，故与目录里的页码不同）。改动本表 = 改动发布范围。
 APPENDIX_DIRNAME = "appendix"
 APPENDIX_TITLE = "书前书后·专文与附录"
+INGREDIENT_DIRNAME = "ingredients"
+INGREDIENT_TITLE = "食材索引"
 APPENDIX_ARTICLES: tuple[dict[str, Any], ...] = (
     {"book_id": "sxcp-1", "title": "前言", "kind": "书前", "pages": (2, 3)},
     {
@@ -332,6 +334,285 @@ def render_footnotes(matched: list[dict[str, Any]]) -> str:
     ).format(n=len(matched), lis=lis)
 
 
+# ------------------------------------------------------- 食材索引与正文链接化
+#
+# 全书 824 个食材写法里有大量「表状态 / 处理方式」的前后缀变体
+# （水木耳 / 木耳 / 净木耳，净冬笋 / 冬笋片 / 冬笋）。每个写法单独成页太零碎，
+# 强行归一又丢原书用词，所以：**一个基名一页，页内按原书写法分组**。
+#
+# 基名 = 反复剥掉下列前后缀后、仍然「站得住」的最长残词。「站得住」有两条口径，
+# 都由全库统计说话，不靠人拍脑袋：
+#   1) 残词本身就是原书的食材写法（在词表里出现过）——如 木耳、冬笋、猪肉、姜；
+#   2) 残词长度 ≥2，且有 **两个以上**不同写法「只剥前缀」就能汇到它——
+#      如 水海参 / 水发海参 → 海参，水鱼肚 / 水发鱼肚 / 干鱼肚 → 鱼肚。
+#      原书从不单写「海参」，但两种写法一致指向它，这个基名是可信的。
+# 单字残词只在口径 1 下接受（姜、葱、蒜 原书确有单写），否则「肉米→肉」「水粉丝→粉」
+# 这类过度剥离全被挡住。后缀剥离**不参与**口径 2，否则「玉兰片→玉兰」会成立。
+BASE_PREFIXES = ("水发", "净", "水", "熟", "生", "鲜", "干")
+BASE_SUFFIXES = ("片", "丝", "米", "丁", "块", "条", "末")
+# 前后缀是名字的一部分，剥了就是另一样东西——一律按原样自成基名。
+# 多数已被上面的规则挡住，这里显式再兜一层，同时充当「刻意不剥」的清单。
+INGREDIENT_ATOMIC = frozenset(
+    {
+        "生菜", "干菜", "水晶", "干贝", "玉兰片", "花生米", "海米", "虾米", "大米",
+        "江米", "糯米", "籼米", "薏米", "香米", "葛仙米", "肉米", "肉丝", "粉条",
+        "粉丝", "粉皮", "青红丝", "红丝", "鲜桃", "鲜梨", "干姜", "生姜",
+        # 熟面＝熟面粉（做馅用），与「面」（面粉／面条）不是一味东西。
+        # 规则本会因「面」在书里单独出现过而把它并进去，故显式挡住。
+        "熟面",
+    }
+)
+# 剥出来会改词义的残词，永不作基名（长度 ≥2 才需要列，单字已被规则挡住）。
+INGREDIENT_NOT_A_BASE = frozenset({"玉兰", "花生", "青红", "大海", "熟笋", "竹笋切"})
+
+
+def _affix_residuals(name: str) -> dict[str, bool]:
+    """名字可达的全部残词 → 该残词是否「只靠剥前缀」到达（供口径 2 判定）。"""
+    seen: dict[str, bool] = {name: True}
+    frontier = [(name, True)]
+    while frontier:
+        current, prefix_only = frontier.pop()
+        for affix in BASE_PREFIXES:
+            if current.startswith(affix) and len(current) > len(affix):
+                shorter = current[len(affix):]
+                if shorter not in seen or (prefix_only and not seen[shorter]):
+                    seen[shorter] = prefix_only
+                    frontier.append((shorter, prefix_only))
+        for affix in BASE_SUFFIXES:
+            if current.endswith(affix) and len(current) > len(affix):
+                shorter = current[: -len(affix)]
+                if shorter not in seen:
+                    seen[shorter] = False
+                    frontier.append((shorter, False))
+    del seen[name]
+    return seen
+
+
+def ingredient_bases(terms: list[str]) -> dict[str, str]:
+    """全库食材写法 → 基名。规则见上方注释；结果对同一批 terms 是确定的。"""
+    unique = list(dict.fromkeys(terms))
+    attested = set(unique)
+    residuals = {name: _affix_residuals(name) for name in unique}
+    prefix_support: dict[str, int] = {}
+    for table in residuals.values():
+        for word, prefix_only in table.items():
+            if prefix_only:
+                prefix_support[word] = prefix_support.get(word, 0) + 1
+
+    def usable(word: str) -> bool:
+        if word in INGREDIENT_NOT_A_BASE:
+            return False
+        if word in attested:
+            return True
+        return len(word) >= 2 and prefix_support.get(word, 0) >= 2
+
+    # 一步：挑最长的「站得住」残词。
+    step: dict[str, str] = {}
+    for name in unique:
+        if name in INGREDIENT_ATOMIC:
+            step[name] = name
+            continue
+        options = [word for word in residuals[name] if usable(word)]
+        step[name] = max(options, key=lambda word: (len(word), word)) if options else name
+
+    # 传递闭包：水玉兰片丝 → 玉兰片丝 → 玉兰片，熟火腿丝 → 熟火腿 → 火腿。
+    # 每步严格变短，不可能成环。
+    bases: dict[str, str] = {}
+    for name in unique:
+        current = name
+        # step 只为「书里出现过的写法」建了键，但它的值可能是一个剥出来的残词
+        # （如 响皮），那种词不在 unique 里、没有自己的条目 → 用 get 兜底，
+        # 取不到就说明已经到底了。直接 step[current] 会 KeyError（实测崩在 响皮）。
+        while True:
+            nxt = step.get(current, current)
+            if nxt == current:
+                break
+            current = nxt
+        bases[name] = current
+    return bases
+
+
+def _recipe_terms(recipe: dict[str, Any]) -> list[str]:
+    """一道菜的食材写法。复用 vault 食材索引的同一个抽取器，两边口径不会漂。"""
+    from .obsidian_exporter import _extract_terms
+
+    return _extract_terms(
+        [str(row) for row in (recipe.get("ingredients") or [])]
+        + [str(row) for row in (recipe.get("seasonings") or [])]
+    )
+
+
+def build_ingredient_index(recipes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """归出基名分组：[{base, count, variants:[{name, recipes:[...]}]}]，按菜数降序。"""
+    by_term: dict[str, list[dict[str, Any]]] = {}
+    for recipe in recipes:
+        for term in _recipe_terms(recipe):
+            by_term.setdefault(term, []).append(recipe)
+    bases = ingredient_bases(list(by_term))
+
+    grouped: dict[str, list[str]] = {}
+    for term, base in bases.items():
+        grouped.setdefault(base, []).append(term)
+
+    index: list[dict[str, Any]] = []
+    for base, terms in grouped.items():
+        variants = [
+            {
+                "name": term,
+                "recipes": sorted(
+                    by_term[term], key=lambda r: (r.get("book_id", ""), r["slug"])
+                ),
+            }
+            for term in sorted(terms, key=lambda t: (-len(by_term[t]), t))
+        ]
+        dishes = {r["slug"] for term in terms for r in by_term[term]}
+        index.append({"base": base, "count": len(dishes), "variants": variants})
+    index.sort(key=lambda item: (-item["count"], item["base"]))
+    return index
+
+
+_TAG_RE = re.compile(r"<[^>]*>")
+_OPEN_A_RE = re.compile(r"<a[\s>]", re.IGNORECASE)
+_CLOSE_A_RE = re.compile(r"</a\s*>", re.IGNORECASE)
+
+
+class IngredientLinker:
+    """把正文行里的食材写法换成指向索引页的链接。
+
+    输入是 **已转义、可能已插好 `<sup>` 上角标** 的 HTML 行（attach_annotations 的产物），
+    所以必须：① 只在标签之外的文本段上替换；② 不进 `<a>…</a>` 内部（否则嵌套锚点）；
+    ③ 用已转义形式去匹配，别再动转义。匹配最长优先——「水木耳」不会被「木耳」切开。
+    """
+
+    def __init__(self, index: list[dict[str, Any]]) -> None:
+        self.targets: dict[str, tuple[str, int]] = {}
+        for item in index:
+            for variant in item["variants"]:
+                self.targets[variant["name"]] = (item["base"], len(variant["recipes"]))
+        # 长的排在前面：Python 的 `|` 取最左侧能匹配的分支，长度降序即最长优先。
+        names = sorted(self.targets, key=lambda n: (-len(n), n))
+        escaped = [re.escape(_esc(name)) for name in names]
+        self._by_escaped = {_esc(name): name for name in names}
+        self._pattern = re.compile("|".join(escaped)) if escaped else None
+
+    def _link(self, match: re.Match[str], depth: int) -> str:
+        name = self._by_escaped[match.group(0)]
+        base, count = self.targets[name]
+        href = (
+            f"{'../' * depth}{INGREDIENT_DIRNAME}/{_esc(base)}.html"
+            f"#{_variant_anchor(name)}"
+        )
+        return (
+            f'<a class="ing" href="{href}" title="{_esc(name)}·{count} 道菜">'
+            f"{match.group(0)}</a>"
+        )
+
+    def _text(self, segment: str, depth: int) -> str:
+        if not segment or self._pattern is None:
+            return segment
+        return self._pattern.sub(lambda m: self._link(m, depth), segment)
+
+    def linkify(self, row: str, *, depth: int = 1) -> str:
+        out: list[str] = []
+        position = 0
+        inside_anchor = 0
+        for tag in _TAG_RE.finditer(row):
+            chunk = row[position : tag.start()]
+            out.append(chunk if inside_anchor else self._text(chunk, depth))
+            out.append(tag.group(0))
+            if _OPEN_A_RE.match(tag.group(0)):
+                inside_anchor += 1
+            elif _CLOSE_A_RE.match(tag.group(0)):
+                inside_anchor = max(0, inside_anchor - 1)
+            position = tag.end()
+        tail = row[position:]
+        out.append(tail if inside_anchor else self._text(tail, depth))
+        return "".join(out)
+
+    def linkify_rows(
+        self, rows: dict[str, list[str]], *, depth: int = 1
+    ) -> dict[str, list[str]]:
+        return {
+            key: [self.linkify(row, depth=depth) for row in value]
+            for key, value in rows.items()
+        }
+
+
+def _variant_anchor(name: str) -> str:
+    return f"v-{_esc(name)}"
+
+
+def render_ingredient_page(item: dict[str, Any]) -> str:
+    """一个基名一页：页内按原书写法分组，各组列出用到它的菜。"""
+    blocks = []
+    for variant in item["variants"]:
+        links = "".join(
+            f'<li><a href="../recipes/{_esc(r["slug"])}.html">{_esc(r.get("title") or r["slug"])}</a>'
+            f'<span class="sub">{_book_label(r.get("book_id", ""))} · '
+            f'{_esc(_page_range(r.get("local_pages") or []))}</span></li>'
+            for r in variant["recipes"]
+        )
+        same = " variant-base" if variant["name"] == item["base"] else ""
+        blocks.append(
+            f'<section class="block variant{same}" id="{_variant_anchor(variant["name"])}">'
+            f'<h2>{_esc(variant["name"])}</h2>'
+            f'<p class="meta">原书写法「{_esc(variant["name"])}」· {len(variant["recipes"])} 道菜</p>'
+            f'<ul class="dishlist">{links}</ul></section>'
+        )
+    note = ""
+    if len(item["variants"]) > 1:
+        note = (
+            f'<p>原书对它有 <strong>{len(item["variants"])}</strong> 种写法'
+            f"（前缀「净/水/水发/熟/生/鲜/干」、后缀「片/丝/米/丁/块/条/末」表处理状态），"
+            "下面按原书写法分组照录，不作合并改写。</p>"
+        )
+    body = f"""
+<main class="home ingredient">
+  <p class="crumbs"><a href="../index.html">全部菜谱</a> › <a href="index.html">{INGREDIENT_TITLE}</a> › {_esc(item["base"])}</p>
+  <div class="hero">
+    <h1>{_esc(item["base"])}</h1>
+    <p>共 <strong>{item["count"]}</strong> 道菜用到它。</p>
+    {note}
+  </div>
+  {"".join(blocks)}
+</main>
+"""
+    return _layout(f"{item['base']} · {INGREDIENT_TITLE} · {SITE_TITLE}", body, depth=1)
+
+
+def render_ingredient_index(index: list[dict[str, Any]]) -> str:
+    """总览：全部基名按菜数降序（同数按字排），标注菜数与写法数。"""
+    common = [item for item in index if item["count"] >= 5]
+    rest = [item for item in index if item["count"] < 5]
+
+    def cards(rows: list[dict[str, Any]]) -> str:
+        return "".join(
+            f'<li class="card"><a href="{_esc(item["base"])}.html">{_esc(item["base"])}</a>'
+            f'<div class="sub">{item["count"]} 道菜'
+            + (f' · {len(item["variants"])} 种写法' if len(item["variants"]) > 1 else "")
+            + "</div></li>"
+            for item in rows
+        )
+
+    variants_total = sum(len(item["variants"]) for item in index)
+    body = f"""
+<main class="home ingredient-index">
+  <p class="crumbs"><a href="../index.html">全部菜谱</a> › {INGREDIENT_TITLE}</p>
+  <div class="hero">
+    <h1>{INGREDIENT_TITLE}</h1>
+    <p>原书共出现 <strong>{variants_total}</strong> 种食材写法，归为 <strong>{len(index)}</strong> 个条目
+    （「水木耳 / 水发木耳 / 木耳」这类只差处理状态的写法收进同一条，页内仍按原书写法分组照录）。
+    菜谱正文里的食材名都是链接，点一下即到这里。</p>
+  </div>
+  <section class="block"><h2>常见食材（5 道菜以上，{len(common)} 条）</h2>
+    <ul class="grid">{cards(common)}</ul></section>
+  <section class="block"><h2>其余 {len(rest)} 条</h2>
+    <ul class="grid">{cards(rest)}</ul></section>
+</main>
+"""
+    return _layout(f"{INGREDIENT_TITLE} · {SITE_TITLE}", body, depth=1)
+
+
 def _first_page(recipe: dict[str, Any]) -> int | None:
     pages = recipe.get("local_pages") or []
     return pages[0] if pages else None
@@ -374,7 +655,7 @@ def _layout(title: str, body: str, *, depth: int, extra_head: str = "") -> str:
 <body>
 <header class="topbar">
   <a class="brand" href="{prefix}index.html">{SITE_TITLE}<span class="brand-sub">{SITE_SUBTITLE}</span></a>
-  <nav><a href="{prefix}{APPENDIX_DIRNAME}/index.html">专文与附录</a><a href="{REPO_URL}" rel="noopener">GitHub</a></nav>
+  <nav><a href="{prefix}{INGREDIENT_DIRNAME}/index.html">{INGREDIENT_TITLE}</a><a href="{prefix}{APPENDIX_DIRNAME}/index.html">专文与附录</a><a href="{REPO_URL}" rel="noopener">GitHub</a></nav>
 </header>
 {body}
 <footer class="footer">
@@ -407,6 +688,7 @@ def render_recipe_page(
     category: str,
     site_base: str,
     annotations: list[dict[str, Any]] | None = None,
+    linker: IngredientLinker | None = None,
 ) -> str:
     title = recipe.get("title") or recipe.get("slug", "")
     book_id = recipe.get("book_id", "")
@@ -415,7 +697,11 @@ def render_recipe_page(
     page_url = f"{site_base}/recipes/{slug}.html" if site_base else f"recipes/{slug}.html"
 
     # 正文行在这里已经转义完并插好上角标；section() 不得再转义。
+    # 顺序固定为「先挂角标、后链接化」：角标靠 find(_esc(anchor)) 定位，
+    # 若先插了 <a> 标签，锚文本会被标签切断而失配。链接化则天然能跳过既有标签。
     rows_by_key, matched, _unmatched = attach_annotations(recipe, list(annotations or []))
+    if linker is not None:
+        rows_by_key = linker.linkify_rows(rows_by_key, depth=1)
 
     def section(heading: str, key: str, cls: str = "") -> str:
         rows = rows_by_key.get(key) or []
@@ -464,6 +750,7 @@ def render_appendix_page(
     page: dict[str, Any],
     site_base: str,
     annotations: list[dict[str, Any]] | None = None,
+    linker: IngredientLinker | None = None,
 ) -> str:
     """一个回退页 = 一个 HTML，版式与菜谱页一致（左正文右页图），正文按段落照录。"""
     book_id = page.get("book_id", "")
@@ -480,6 +767,8 @@ def render_appendix_page(
     rows_by_key, matched, _unmatched = attach_annotations(
         page, list(annotations or []), APPENDIX_SECTIONS
     )
+    if linker is not None:
+        rows_by_key = linker.linkify_rows(rows_by_key, depth=1)
     paragraphs = "\n".join(f"<p>{row}</p>" for row in rows_by_key.get("body") or [])
     if not paragraphs:
         paragraphs = '<p class="muted">此页无可显示的文本，请直接看右侧页图。</p>'
@@ -581,6 +870,7 @@ def render_index_page(
     recipes: list[dict[str, Any]],
     categories: list[str],
     appendix: list[dict[str, Any]] | None = None,
+    ingredients: list[dict[str, Any]] | None = None,
 ) -> str:
     book_chips = "".join(
         f'<button class="chip" data-filter="book" data-value="{bid}">{_book_label(bid)}</button>'
@@ -616,12 +906,34 @@ def render_index_page(
     <ul class="grid">{links}</ul>
   </section>"""
 
+    # 食材入口：与专文入口同一版式，卡片给最常用的几味，落到具体食材页。
+    ingredients = ingredients or []
+    ingredient_html = ""
+    if ingredients:
+        top = ingredients[:12]
+        links = "".join(
+            f'<li class="card">'
+            f'<a href="{INGREDIENT_DIRNAME}/{_esc(item["base"])}.html">{_esc(item["base"])}</a>'
+            f'<div class="sub">{item["count"]} 道菜</div></li>'
+            for item in top
+        )
+        variants_total = sum(len(item["variants"]) for item in ingredients)
+        ingredient_html = f"""
+  <section class="promo">
+    <h2><a href="{INGREDIENT_DIRNAME}/index.html">{INGREDIENT_TITLE}</a></h2>
+    <p>原书 <strong>{variants_total}</strong> 种食材写法归为 <strong>{len(ingredients)}</strong> 个条目：
+    每页列出用到它的全部菜谱，并按原书写法（净 / 水发 / 熟 / 片 / 丝…）分组照录。
+    菜谱正文里的食材名都是链接，点一下即到。</p>
+    <ul class="grid">{links}</ul>
+  </section>"""
+
     body = f"""
 <main class="home">
   <div class="hero">
     <h1>{SITE_TITLE}</h1>
     <p>{SITE_SUBTITLE}——共 <strong>{len(recipes)}</strong> 道菜，641 页原书扫描图逐页校对。</p>
   </div>
+  {ingredient_html}
   {appendix_html}
   <div class="controls">
     <input id="q" type="search" placeholder="搜索菜名、食材、做法…" autocomplete="off">
@@ -724,6 +1036,26 @@ sup.fn a:hover{text-decoration:none;background:var(--accent-soft);border-radius:
 .pagelist a{border:1px solid var(--line);background:var(--panel);border-radius:6px;
   padding:.2rem .6rem;font-size:.82rem;display:inline-block}
 .appendix-index .block{margin-bottom:1.6rem}
+/* 食材链接：正文里出现频繁，故只用底线 + 极淡底色，不抢正文的黑度；
+   accent 系变量在明暗两套配色里都已调过对比度，跟着它走即可。 */
+a.ing{color:inherit;text-decoration:none;
+  border-bottom:1px solid color-mix(in srgb,var(--accent) 45%,transparent);
+  background:color-mix(in srgb,var(--accent-soft) 55%,transparent);
+  border-radius:2px;padding:0 .06em}
+a.ing:hover,a.ing:focus{color:var(--accent);background:var(--accent-soft);
+  border-bottom-color:var(--accent);text-decoration:none}
+@supports not (color:color-mix(in srgb,red,blue)){
+  a.ing{border-bottom:1px solid var(--accent);background:var(--accent-soft)}
+}
+.ingredient .variant{margin-bottom:1.6rem;scroll-margin-top:70px}
+.ingredient .variant:target h2{color:var(--ink);background:var(--accent-soft);
+  border-radius:4px;padding-left:.3rem}
+.ingredient .hero p{margin:0 0 .4rem}
+.dishlist{list-style:none;padding:0;margin:.4rem 0 0}
+.dishlist li{margin:.35rem 0;display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline}
+.dishlist .sub{color:var(--muted);font-size:.78rem}
+.ingredient-index .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.ingredient-index .card a{font-weight:600}
 .footer{border-top:1px solid var(--line);margin-top:2rem;padding:1.2rem 1.4rem;
   color:var(--muted);font-size:.78rem;text-align:center}
 .footer p{margin:.25rem 0}
@@ -817,12 +1149,17 @@ def build_site(root: Path) -> dict[str, Any]:
 
     appendix_pages, appendix_skipped = appendix_plan(load_page_fallbacks(vault_root))
 
+    ingredient_index = build_ingredient_index(recipes)
+    linker = IngredientLinker(ingredient_index)
+
     site_dir = root / "site"
     recipes_dir = root / "recipes"
     appendix_dir = root / APPENDIX_DIRNAME
+    ingredient_dir = root / INGREDIENT_DIRNAME
     site_dir.mkdir(exist_ok=True)
     recipes_dir.mkdir(exist_ok=True)
     appendix_dir.mkdir(exist_ok=True)
+    ingredient_dir.mkdir(exist_ok=True)
 
     # 菜名变化会改变文件名，旧 HTML 若不清理会留在 recipes/ 里继续被发布。
     # 先记下本次应当产出的文件名，收尾时删除多余者。
@@ -861,7 +1198,8 @@ def build_site(root: Path) -> dict[str, Any]:
         claimed.update(id(item) for item in matched)
         annotations_rendered += len(matched)
         (recipes_dir / f"{recipe['slug']}.html").write_text(
-            render_recipe_page(recipe, category, SITE_BASE, matched), encoding="utf-8"
+            render_recipe_page(recipe, category, SITE_BASE, matched, linker),
+            encoding="utf-8",
         )
 
     entries.sort(key=lambda e: (e["b"], e["u"]))
@@ -876,14 +1214,23 @@ def build_site(root: Path) -> dict[str, Any]:
         claimed.update(id(item) for item in matched)
         annotations_rendered += len(matched)
         (appendix_dir / f"{page['slug']}.html").write_text(
-            render_appendix_page(page, SITE_BASE, matched), encoding="utf-8"
+            render_appendix_page(page, SITE_BASE, matched, linker), encoding="utf-8"
         )
     (appendix_dir / "index.html").write_text(
         render_appendix_index(appendix_pages, appendix_skipped), encoding="utf-8"
     )
 
+    for item in ingredient_index:
+        (ingredient_dir / f"{item['base']}.html").write_text(
+            render_ingredient_page(item), encoding="utf-8"
+        )
+    (ingredient_dir / "index.html").write_text(
+        render_ingredient_index(ingredient_index), encoding="utf-8"
+    )
+
     (root / "index.html").write_text(
-        render_index_page(recipes, ordered_categories, appendix_pages), encoding="utf-8"
+        render_index_page(recipes, ordered_categories, appendix_pages, ingredient_index),
+        encoding="utf-8",
     )
     (site_dir / "style.css").write_text(STYLE_CSS.strip() + "\n", encoding="utf-8")
     (site_dir / "app.js").write_text(APP_JS.strip() + "\n", encoding="utf-8")
@@ -910,6 +1257,17 @@ def build_site(root: Path) -> dict[str, Any]:
             stale.unlink()
             appendix_pruned += 1
 
+    # 同理清 ingredients/：改基名规则、或原书写法被校对改动后，旧基名页不能留。
+    expected_ingredients = {"index.html"} | {
+        f"{item['base']}.html" for item in ingredient_index
+    }
+    ingredients_pruned = 0
+    for stale in ingredient_dir.glob("*.html"):
+        if stale.name not in expected_ingredients:
+            LOGGER.info("删除陈旧食材页: %s", stale.name)
+            stale.unlink()
+            ingredients_pruned += 1
+
     # 一条注释若全库无人认领，就是锚文本没对上（菜名改了、文本被归一化动过、页码写错）。
     # 静默跳过会让注释悄悄消失，所以在这里显形。
     unmatched = [item for item in annotations if id(item) not in claimed]
@@ -928,6 +1286,9 @@ def build_site(root: Path) -> dict[str, Any]:
         "appendix_pages": len(appendix_pages),
         "appendix_pruned": appendix_pruned,
         "fallbacks_skipped": len(appendix_skipped),
+        "ingredient_pages": len(ingredient_index),
+        "ingredient_variants": sum(len(i["variants"]) for i in ingredient_index),
+        "ingredients_pruned": ingredients_pruned,
         "categories": len(ordered_categories),
         "uncategorized": sum(1 for e in entries if e["c"] == UNCATEGORIZED),
         "annotations": len(annotations),
@@ -936,10 +1297,13 @@ def build_site(root: Path) -> dict[str, Any]:
     }
     LOGGER.info(
         "Site built: %s recipes, %s appendix pages (%s fallbacks skipped), "
+        "%s ingredient pages (%s written forms), "
         "%s categories (%s uncategorized), annotations %s rendered / %s unmatched",
         stats["recipes"],
         stats["appendix_pages"],
         stats["fallbacks_skipped"],
+        stats["ingredient_pages"],
+        stats["ingredient_variants"],
         stats["categories"],
         stats["uncategorized"],
         stats["annotations_rendered"],
