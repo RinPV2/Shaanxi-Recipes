@@ -13,6 +13,23 @@ def _load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def repo_relative(value, project_root: Path) -> str:
+    """把本机绝对路径压成仓库相对的 posix 路径。
+
+    ``work/page_review_md/`` 是入库并公开发布的,frontmatter 里不能留本机
+    绝对路径(2026-07-28 已洗过一轮,重建时若再写绝对路径就是把隐私加固
+    推翻)。落在仓库外的路径原样返回。
+    """
+    if not value:
+        return ""
+    text = str(value)
+    try:
+        rel = Path(text).resolve().relative_to(Path(project_root).resolve())
+    except (ValueError, OSError):
+        return text.replace("\\", "/")
+    return rel.as_posix()
+
+
 def _load_confirmation_map(source: Path) -> dict[tuple[str, int], dict]:
     if not source.exists():
         return {}
@@ -60,9 +77,17 @@ def render_page_review_markdown(
     recipe_candidates: list[dict] | None = None,
     fallback_candidates: list[dict] | None = None,
     confirmation: dict | None = None,
+    project_root: Path | None = None,
 ) -> str:
     if image_relative_path is None:
         image_relative_path = image_path
+    source_pdf_path = page["source_pdf_path"]
+    source_json_path = page["source_json_path"]
+    if project_root is not None:
+        # 公开发布的记录里只写仓库相对路径,不泄漏本机目录结构
+        image_path = repo_relative(image_path, project_root)
+        source_pdf_path = repo_relative(source_pdf_path, project_root)
+        source_json_path = repo_relative(source_json_path, project_root)
     recipe_candidates = recipe_candidates or []
     fallback_candidates = fallback_candidates or []
     notes = confirmation["notes"] if confirmation else ""
@@ -77,8 +102,8 @@ def render_page_review_markdown(
         "confidence": page["confidence"],
         "review_needed": page["review_needed"],
         "image_path": image_path,
-        "source_pdf_path": page["source_pdf_path"],
-        "source_json_path": page["source_json_path"],
+        "source_pdf_path": source_pdf_path,
+        "source_json_path": source_json_path,
         "title_candidates": page.get("title_candidates", []),
         "current_recipe_candidates": [row["title"] for row in recipe_candidates],
         "current_fallback_candidates": [row["title"] for row in fallback_candidates],
@@ -166,6 +191,8 @@ def build_page_review_dataset(context, requested_ids: list[str] | None = None) -
                 recipe_candidates=recipe_map.get(key, []),
                 fallback_candidates=fallback_map.get(key, []),
                 confirmation=confirmation_map.get(key),
+                # 精简 context(测试替身)可能没有 project_root,退回 work_root 的父目录
+                project_root=getattr(context, "project_root", None) or context.work_root.parent,
             )
             write_text(review_md_path, markdown)
             manifest_rows.append(
