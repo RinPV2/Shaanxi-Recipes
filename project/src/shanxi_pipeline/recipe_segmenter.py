@@ -6,6 +6,7 @@ from typing import Any
 
 from .models import BookEntry, NormalizedPage, PageFallbackNote, RecipeCandidate, ReviewItem
 from .utils import (
+    RECIPE_ENUM_WITH_NAME,
     is_plausible_dish_title,
     normalize_text,
     split_numbered_steps,
@@ -62,7 +63,9 @@ def is_recipe_title(text: str) -> bool:
         return False
     if cleaned.endswith("类") or "目录" in cleaned or cleaned == "陕西菜谱":
         return False
-    match = re.match(r"^[（(]?[一二三四五六七八九十百零〇0-9]+[）)]\s*(.+)", cleaned)
+    # 编号形态（含「污损到不可辨」的一种）统一由 utils.RECIPE_ENUM_WITH_NAME 定义，
+    # 与 strip_recipe_enumerator / page_normalizer.RECIPE_ENUMERATOR 共用一套口径。
+    match = RECIPE_ENUM_WITH_NAME.match(cleaned)
     if not match:
         return False
     # 序号后接章节名 → 是章节头，不是菜名
@@ -756,6 +759,48 @@ def _implied_steps_start(blocks: list[dict[str, Any]]) -> tuple[int, bool]:
     return 0, False
 
 
+# ---------------------------------------------------------------------------
+# 原料条目的分组修正（2026-07-30，页图逐行核对）
+#
+# 原书的原料表是**左右两栏成对、行标签统领整行**：书1 p92 烧牛蹄筋 的
+# 「配料：水玉兰片（切片）半两　　水木耳 三钱」是一整个印刷行（三块的 bbox y 都在
+# 530–550），所以右栏的「水木耳 三钱」也属**配料**。但分段器是按「栏块的出现次序」
+# 平铺条目的：MinerU 把右栏切成独立块后，这些块排在左栏整列之后（index 14 起），
+# 于是一律继承左栏最后一个标签（调料），水木耳就落到了调料第 6 位。
+#
+# 根治办法是「按 bbox **行**归组（行标签统领本行左右两项）而非按栏块出现次序」，
+# 但那会改动全库原料条目的顺序（等于一次全库 diff），本轮不做（见 CLAUDE.md 待办）。
+# 这里只按页图逐条修正**确凿**的错位，不做任何推断。
+#
+# ⚠️ **不要顺手加书1 p140 排捶鸡丝的「水木耳 一钱」**：那一处页图上原书就排在调料区
+# （「姜片 二钱　水木耳 一钱」同在调料的印刷行里），vault 与页图一致，改了就是制造错误。
+#
+# 键 = (册号, 本条首个本地页, 条目原文)，值 = (目标分组, 插在目标组的哪个条目之后)。
+# 键含页码与条目原文，任何一处漂了就不再命中——配套测试
+# （test_segmenter.IngredientGroupFixTests）会因此失败，不会静默失效。
+_GROUP_FIXES: dict[tuple[str, int, str], tuple[str, str]] = {
+    ("sxcp-1", 92, "水木耳 三钱"): ("ingredient", "配料：水玉兰片（切片） 半两"),
+}
+
+
+def _apply_group_fixes(
+    book_id: str,
+    first_page: int,
+    ingredients: list[str],
+    seasonings: list[str],
+) -> None:
+    for (fix_book, fix_page, item), (group, after) in _GROUP_FIXES.items():
+        if fix_book != book_id or fix_page != first_page:
+            continue
+        source, target = (
+            (seasonings, ingredients) if group == "ingredient" else (ingredients, seasonings)
+        )
+        if item not in source or after not in target:
+            continue
+        source.remove(item)
+        target.insert(target.index(after) + 1, item)
+
+
 def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[ReviewItem]]:
     ingredients: list[str] = []
     seasonings: list[str] = []
@@ -799,6 +844,11 @@ def _finalize_recipe(active: ActiveRecipe) -> tuple[RecipeCandidate, list[Review
             tips.append(text)
         else:
             other_text.append(text)
+
+    if active.local_pages:
+        _apply_group_fixes(
+            active.book.book_id, min(active.local_pages), ingredients, seasonings
+        )
 
     if not ingredients and other_text:
         ingredients.extend(other_text[:2])

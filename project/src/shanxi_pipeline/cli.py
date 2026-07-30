@@ -33,6 +33,7 @@ from .reports import (
     write_validation_checklist,
 )
 from .review_web import serve_review_web
+from .title_policy import apply_title_policy, attach_manual_aliases, attach_toc_aliases
 from .utils import ensure_dir, is_plausible_dish_title, setup_logging, write_json, write_text
 
 
@@ -139,6 +140,28 @@ def _apply_title_overrides(
         recipe.title = override
 
 
+def _load_toc_titles(path: Path) -> dict[str, list[tuple[str, int]]]:
+    """从 toc_anchor_map.json 取每册的「目录菜名 + 本地页」。
+
+    锚点图是上一轮 `build-review-priority` 的产物,内容来自**已确认的目录页**,
+    与本轮的分段结果无关,所以在 process 阶段读它不构成循环依赖;文件不存在时
+    （全新工作区）只是暂时没有目录 alias,下一轮就补上了。
+    """
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    titles: dict[str, list[tuple[str, int]]] = {}
+    for book_id, page_map in payload.items():
+        rows: list[tuple[str, int]] = []
+        for entries in page_map.values():
+            for entry in entries:
+                name = (entry.get("title") or "").strip()
+                if name:
+                    rows.append((name, int(entry.get("local_page") or 0)))
+        titles[book_id] = list(dict.fromkeys(rows))
+    return titles
+
+
 def _collect_page_counts(context) -> dict[str, int]:
     counts: dict[str, int] = {}
     root = context.work_root / "normalized_json"
@@ -177,8 +200,11 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
 
     corrections = load_page_corrections(context.work_root)
     title_overrides = _load_title_overrides(context.work_root / "reports" / "title_override_map.json")
+    toc_titles = _load_toc_titles(context.work_root / "reports" / "toc_anchor_map.json")
     replacements = compile_text_replacements(context.cleaning_rules)
     correction_log: list[dict] = []
+    title_policy_changes: list[dict] = []
+    toc_alias_log: list[dict] = []
 
     all_reviews = _load_existing_review_queue(context.work_root / "reports" / "review_queue.jsonl", {book.book_id for book in books})
     for book in books:
@@ -203,6 +229,11 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
 
         recipes, fallbacks, review_items = segment_book(book, normalized_pages)
         _apply_title_overrides(recipes, title_overrides, correction_log, replacements)
+        # 菜名归一（括号全角 / 剥「（清素）」批注 / 目录写法作 alias）——必须在写
+        # recipe_candidates 之前,否则单册增量导入与全量跑出来的库不一致。
+        title_policy_changes.extend(apply_title_policy(recipes))
+        toc_alias_log.extend(attach_toc_aliases(recipes, toc_titles))
+        toc_alias_log.extend(attach_manual_aliases(recipes))
         write_json(context.work_root / "recipe_candidates" / f"{book.book_id}.json", [recipe.to_dict() for recipe in recipes])
 
         for fallback in fallbacks:
@@ -244,6 +275,15 @@ def process_books(root: Path, requested_ids: list[str] | None = None) -> None:
         "Applied corrections on %s pages (%s unmatched lines).",
         len(correction_log),
         unmatched_total,
+    )
+    write_json(
+        report_root / "title_policy_log.json",
+        {"renamed": title_policy_changes, "toc_aliases": toc_alias_log},
+    )
+    logger.info(
+        "Title policy: renamed %s recipes, attached %s toc aliases.",
+        len(title_policy_changes),
+        len(toc_alias_log),
     )
     write_review_queue(report_root, all_reviews)
     write_ingestion_manifest(report_root, all_manifest_books, recipes_by_book, fallbacks_by_book, reviews_by_book, page_counts)

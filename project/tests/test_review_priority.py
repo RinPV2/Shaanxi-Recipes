@@ -52,8 +52,20 @@ class ReviewPriorityTests(unittest.TestCase):
     def test_paired_parentheses_in_title_are_not_stripped(self) -> None:
         content = "（六〇）箸头面（油泼面）… (60) / （七五）西安包子（四种）… (73) / （六一）窝窝面… (61)"
         rows = _extract_toc_entries(content)
+        # 括号成对时不能剥（原先无条件 strip 会削成「箸头面(油泼面」)。
+        # 括号形态一律全角（用户 2026-07-30「括号全部统一」)——_canonical_text 的 NFKC
+        # 会把全角压成半角,再由 to_fullwidth_parens 归回全角,好与 vault 菜名一侧对齐。
         self.assertEqual(
-            ["箸头面(油泼面)", "西安包子(四种)", "窝窝面"], [row["title"] for row in rows]
+            ["箸头面（油泼面）", "西安包子（四种）", "窝窝面"], [row["title"] for row in rows]
+        )
+
+    def test_halfwidth_parentheses_in_toc_are_normalized_to_fullwidth(self) -> None:
+        # 原书目录里就有半角括号（「牛(羊)肉煮馍」),正文却印全角:纯排版差异,
+        # 不该在锚点图与 vault 菜名之间造成一条假缺口。
+        content = "（一）牛(羊)肉煮馍… (1) / （二）扒牛(羊)肉条… (2) / （三）窝窝面… (3)"
+        rows = _extract_toc_entries(content)
+        self.assertEqual(
+            ["牛（羊）肉煮馍", "扒牛（羊）肉条", "窝窝面"], [row["title"] for row in rows]
         )
 
     def test_entries_without_dot_leader_are_parsed(self) -> None:

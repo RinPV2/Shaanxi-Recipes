@@ -192,6 +192,23 @@ class LoadAnnotationsTests(unittest.TestCase):
             self.assertTrue(item["anchor"].strip())
             self.assertTrue(item["note"].strip())
 
+    def test_glyph_decision_notes_are_present(self):
+        """2026-07-30 的两个字形决策必须**有注可查**，否则读者无从判断与推翻。
+
+        「爦」多数字体渲染不出（会显示成方框），「臊子」则是把原书一贯的「稍子」
+        归到了现代汉语写法——两条都属于「不注读者会误解」，故列进回归测试。
+        """
+        path = Path(__file__).resolve().parents[1] / "config" / "annotations.yaml"
+        loaded = site_builder.load_annotations(path)
+        lan = [item for item in loaded if "爦" in item["anchor"]]
+        self.assertTrue(lan, "干爦 的注释不见了")
+        for item in lan:
+            self.assertIn("lǎn", item["note"])
+            self.assertIn("方框", item["note"])
+        sao = [item for item in loaded if item.get("slug") == "sxcp-3-p0072-岐山面"]
+        self.assertTrue(sao, "臊子 用字归一的注释不见了")
+        self.assertIn("稍子", sao[0]["note"])
+
 
 class BuildSiteAccountingTests(unittest.TestCase):
     """在一个最小假仓库上跑 build_site，验证 stats 与失配计数。"""

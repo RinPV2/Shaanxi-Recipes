@@ -98,10 +98,33 @@ def safe_filename(value: str, max_length: int = 80) -> str:
 # 只删与汉字或括号相邻的空格，避免误伤可能存在的西文内容。
 _TITLE_PAD = re.compile(r"(?<=[一-鿿（）()、])\s+|\s+(?=[一-鿿（）()、])")
 
+# 菜名编号：原书作「（一一〇）」，OCR 偶尔读成阿拉伯数字，前括号有时整个丢掉。
+_RECIPE_ENUM_DIGITS = "一二三四五六七八九十百零〇0-9"
+# **编号被铅印污损到不可辨**时的形态。书2 p109（印刷页 99）「明月红松鸡」的编号
+# 在扫描件上是一团墨迹（20× 页图：三个字位全部糊成连片的黑块，笔画无一可辨），
+# MinerU 把那团墨迹读成了一串拉丁字母：`（Triflox Wreumn Bionnn）明月红松鸡`。
+# 任何数字字符类都救不了它，这道菜因此不算标题，整篇（本地页 109–110）被上一道
+# 「酱爆鸡丁」吞了进去（曾作为已知缺陷记在 CLAUDE.md 里）。
+#
+# 判据只认「**成对**括号 + 纯拉丁（可含空格/点/间隔号） + 后面跟着一个像菜名的串」
+# ——`is_recipe_title` 随后还要过 `is_plausible_dish_title`。全库（parsed_pages，
+# 四册 641 页、未经任何替换）符合此形的块**只有那一处**，无误伤。
+# **不猜编号是几**：目录作「明月红松鸡…(99)」但污损的三个字看不清，
+# 编造「（一一一）」就是编数据，所以只把这团乱码当作「有编号」的凭据剥掉，
+# 标题即「明月红松鸡」。
+_RECIPE_ENUM_GARBLED = r"[A-Za-z][A-Za-z .·]*"
+RECIPE_ENUM_HEAD = re.compile(
+    rf"^(?:[（(]?[{_RECIPE_ENUM_DIGITS}]+[）)]|[（(]{_RECIPE_ENUM_GARBLED}[）)])\s*"
+)
+# 「编号 + 后面确实还有内容」。recipe_segmenter.is_recipe_title 与
+# page_normalizer.RECIPE_ENUMERATOR 共用，两处对编号的口径不会漂。
+# 组 1 = 编号之后的那一行（`.` 不跨行，与旧实现一致）。
+RECIPE_ENUM_WITH_NAME = re.compile(RECIPE_ENUM_HEAD.pattern + r"(.+)")
+
 
 def strip_recipe_enumerator(title: str) -> str:
     cleaned = normalize_text(title)
-    cleaned = re.sub(r"^[（(]?[一二三四五六七八九十百零〇0-9]+[）)]\s*", "", cleaned)
+    cleaned = RECIPE_ENUM_HEAD.sub("", cleaned, count=1)
     cleaned = _TITLE_PAD.sub("", cleaned)
     return cleaned.strip("：: ")
 

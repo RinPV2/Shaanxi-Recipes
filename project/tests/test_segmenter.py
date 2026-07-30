@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from shanxi_pipeline.models import BookEntry, NormalizedPage
 from shanxi_pipeline.recipe_segmenter import (
+    _GROUP_FIXES,
     _repair_split_columns,
     _split_ingredient_line,
     is_recipe_title,
@@ -628,3 +629,165 @@ class ImpliedStepsBoundaryTests(unittest.TestCase):
         self.assertEqual([], recipe.steps)
         self.assertIn("面粉 一斤", recipe.ingredients)
         self.assertEqual(2, recipe.ingredients.count("面粉 一斤"))
+
+
+def _one_page_book(book_id: str = "sxcp-1", series: int = 1) -> BookEntry:
+    return BookEntry(
+        book_id=book_id,
+        series=series,
+        file_name=f"陕西菜谱{series}.pdf",
+        file_path=f"C:/hobby/Shanxi/陕西菜谱{series}.pdf",
+        mineru_json="C:/hobby/Shanxi/example.json",
+        status="ready",
+        enabled=True,
+    )
+
+
+def _page(book: BookEntry, blocks: list[dict], local_page: int) -> NormalizedPage:
+    return NormalizedPage(
+        book_id=book.book_id,
+        book_file=book.file_name,
+        series=book.series,
+        local_page=local_page,
+        source_pdf_path=book.file_path,
+        source_json_path=book.mineru_json,
+        raw_text="",
+        cleaned_text="\n".join(block["text"] for block in blocks),
+        text_blocks=blocks,
+        title_candidates=[b["text"] for b in blocks if b["block_type"] == "title"],
+        structure_hints={"page_kind": "recipe"},
+        ocr_engine="mineru",
+        confidence="high",
+        warnings=[],
+        review_needed=False,
+    )
+
+
+class GarbledEnumeratorTitleTests(unittest.TestCase):
+    """菜名编号被铅印污损、被 OCR 读成拉丁乱码时仍要认出这是标题。
+
+    书2 p109（印刷页 99）「明月红松鸡」的编号在扫描件上是一团墨迹，MinerU 读成
+    `（Triflox Wreumn Bionnn）`。任何数字字符类都救不了它，这道菜曾整篇（本地页
+    109–110）被上一道「酱爆鸡丁」吞掉。**不猜编号是几**，只把乱码当「有编号」的凭据剥掉。
+    """
+
+    def test_garbled_enumerator_is_recognized_as_a_title(self) -> None:
+        self.assertTrue(is_recipe_title("（Triflox Wreumn Bionnn）明月红松鸡"))
+
+    def test_garbled_enumerator_is_stripped_and_number_is_not_invented(self) -> None:
+        title = strip_recipe_enumerator("（Triflox Wreumn Bionnn）明月红松鸡")
+        self.assertEqual("明月红松鸡", title)
+        self.assertNotIn("一一一", title)
+
+    def test_digit_enumerators_still_work(self) -> None:
+        for raw, expected in (
+            ("（一一〇）酱爆鸡丁", "酱爆鸡丁"),
+            ("（35）石子馍", "石子馍"),
+            ("三一）镇川干炉馍", "镇川干炉馍"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertTrue(is_recipe_title(raw))
+                self.assertEqual(expected, strip_recipe_enumerator(raw))
+
+    def test_latin_in_parens_that_is_not_a_dish_title_is_rejected(self) -> None:
+        # 判据只认「成对括号 + 纯拉丁 + 后面像个菜名」；其余形态一律不认，
+        # 免得把正文/章节头/带用量的行冒充成菜名。
+        for text in (
+            "（Triflox Wreumn Bionnn）",              # 后面没有菜名
+            "（Triflox）一、原料：",                    # 章节头
+            "（Triflox）净猪肉 三两",                   # 原料行（带用量串）
+            "（Triflox）取净肉六两，肉划开，皮朝下铺在砧板上。",   # 一段正文
+            "（一一〇 Triflox）明月红松鸡",              # 数字与拉丁混排，不在口径内
+            "Triflox）明月红松鸡",                      # 括号不成对
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(is_recipe_title(text))
+
+    def test_swallowed_recipe_is_split_out(self) -> None:
+        book = _one_page_book("sxcp-2", 2)
+        blocks_109 = [
+            {"block_type": "title", "text": "三、特点："},
+            {"block_type": "text", "text": "色枣红, 汁甜咸, 鸡丁脆嫩, 味醇浓香。"},
+            {"block_type": "title", "text": "（Triflox Wreumn Bionnn）明月红松鸡"},
+            {"block_type": "text", "text": "原料："},
+            {"block_type": "text", "text": "主料：净生鸡腿肉 六两"},
+            {"block_type": "title", "text": "二、制法："},
+            {"block_type": "text", "text": "1. 将鸡腿骨剔去，取净肉六两。"},
+        ]
+        blocks_108 = [
+            {"block_type": "title", "text": "（一一〇）酱爆鸡丁"},
+            {"block_type": "title", "text": "一、原料："},
+            {"block_type": "text", "text": "主料：鸡脯（或鸡腿）肉 三两"},
+            {"block_type": "title", "text": "二、制法："},
+            {"block_type": "text", "text": "1. 鸡脯肉剞浅刀纹。"},
+        ]
+        pages = [_page(book, blocks_108, 108), _page(book, blocks_109, 109)]
+        recipes, _fallbacks, _reviews = segment_book(book, pages)
+        self.assertEqual(["酱爆鸡丁", "明月红松鸡"], [r.title for r in recipes])
+        # 上一道菜相应收缩：不再吞着第二道的原料
+        self.assertEqual(["主料：鸡脯（或鸡腿）肉 三两"], recipes[0].ingredients)
+        self.assertEqual([108, 109], recipes[0].local_pages)
+        self.assertEqual(["主料：净生鸡腿肉 六两"], recipes[1].ingredients)
+        self.assertEqual([109], recipes[1].local_pages)
+
+
+class IngredientGroupFixTests(unittest.TestCase):
+    """原料条目的分组修正（书1 p92 烧牛蹄筋 的「水木耳 三钱」）。
+
+    原书左右两栏成对、**行标签统领整行**：配料行是「水玉兰片（切片）半两　水木耳 三钱」，
+    所以右栏那一条也属配料。分段器按栏块出现次序平铺，右栏各条继承了左栏最后一个标签
+    （调料），水木耳落到调料第 6 位。根治要改成按 bbox 行归组（会牵动全库顺序），
+    本轮只按页图逐条修正，修正表就是 `_GROUP_FIXES`。
+    """
+
+    def _blocks(self) -> list[dict]:
+        # bbox 抄自 work/parsed_pages/sxcp-1/page-0092.json：左栏 x≈115-315、
+        # 右栏名称 x≈348-414、右栏用量 x≈477-510，配料行三块的 y 都在 530-550。
+        return [
+            {"block_type": "title", "text": "（八十三）烧牛蹄筋", "bbox": [217, 427, 384, 446]},
+            {"block_type": "title", "text": "一 原料", "bbox": [83, 471, 149, 489]},
+            {"block_type": "text", "text": "主料：牛蹄筋 四两", "bbox": [115, 507, 315, 527]},
+            {"block_type": "text", "text": "配料：水玉兰片（切片）半两", "bbox": [115, 530, 315, 550]},
+            {"block_type": "text", "text": "调料：酱 油 半两", "bbox": [116, 555, 315, 575]},
+            {"block_type": "text", "text": "食盐水 二钱", "bbox": [164, 650, 314, 670]},
+            {"block_type": "text", "text": "水木耳", "bbox": [348, 530, 414, 549]},
+            {"block_type": "text", "text": "味 精", "bbox": [348, 555, 414, 573]},
+            {"block_type": "text", "text": "三钱", "bbox": [477, 530, 510, 549]},
+            {"block_type": "text", "text": "二分", "bbox": [477, 555, 510, 573]},
+            {"block_type": "title", "text": "二、制法，", "bbox": [85, 692, 155, 710]},
+            {"block_type": "text", "text": "1. 取生牛蹄筋一斤。", "bbox": [115, 726, 510, 748]},
+        ]
+
+    def test_water_fungus_moves_into_ingredients_after_its_row_mate(self) -> None:
+        book = _one_page_book("sxcp-1", 1)
+        recipes, _fb, _rv = segment_book(book, [_page(book, self._blocks(), 92)])
+        recipe = recipes[0]
+        self.assertEqual(
+            ["主料：牛蹄筋 四两", "配料：水玉兰片（切片） 半两", "水木耳 三钱"],
+            recipe.ingredients,
+        )
+        self.assertNotIn("水木耳 三钱", recipe.seasonings)
+        # 其余调料条目的相对次序不受影响
+        self.assertEqual(
+            ["调料：酱油 半两", "食盐水 二钱", "味精 二分"], recipe.seasonings
+        )
+
+    def test_fix_is_page_scoped(self) -> None:
+        # 同样的条目出现在别的页（书1 p140 排捶鸡丝 的「水木耳 一钱」页图上原书就在
+        # 调料区）不受影响——修正表的键含册号与本地页。
+        book = _one_page_book("sxcp-1", 1)
+        blocks = self._blocks()
+        recipes, _fb, _rv = segment_book(book, [_page(book, blocks, 140)])
+        self.assertIn("水木耳 三钱", recipes[0].seasonings)
+        self.assertNotIn("水木耳 三钱", recipes[0].ingredients)
+
+    def test_fix_table_stays_minimal_and_documented(self) -> None:
+        # 这张表是「本轮只修确凿错位」的凭据；扩表请连页图证据一起写进注释。
+        self.assertEqual(
+            {("sxcp-1", 92, "水木耳 三钱"): ("ingredient", "配料：水玉兰片（切片） 半两")},
+            _GROUP_FIXES,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

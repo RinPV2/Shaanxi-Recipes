@@ -9,6 +9,20 @@ from .manifest import load_books
 from .utils import dump_yaml, ensure_dir, normalize_text, write_json, write_text
 
 
+# 页面文本两段的段名。
+#
+# `page.cleaned_text` = 套用校对 → normalize_text → cleaning_rules.text_replacements 之后。
+# `page.raw_text`     = **套用校对之后、清洗之前**。它一度叫「## 原始 OCR 文本」,
+#   那是 Defect A 修好（correction_applier 插到 normalize 之前）以前的事:现在
+#   correction_applier 会把校对记录的「正确内容」打回 text_blocks 并重建 raw_text,
+#   所以这一段早已不是 MinerU 吐出来的原文了。
+#   证据:书1 p0001 这一段显示「陕西菜谱」,而真正的原始 OCR 是「陕西学诗」。
+#   段名不改的话,后续复审会看到已经修好的文本、误判「OCR 没问题」而跳过真正的漏改。
+#   真正的原始 OCR 在 work/parsed_pages/<book_id>/page-XXXX.json 里（未经校对、未经清洗）。
+COLLECTED_TEXT_HEADING = "## 当前采集文本"
+CORRECTED_TEXT_HEADING = "## 校对后文本（未清洗）"
+
+
 def _load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -135,10 +149,10 @@ def render_page_review_markdown(
         "## 警告",
         f"- {json.dumps(page.get('warnings', []), ensure_ascii=False)}",
         "",
-        "## 当前采集文本",
+        COLLECTED_TEXT_HEADING,
         page.get("cleaned_text", "") or "无",
         "",
-        "## 原始 OCR 文本",
+        CORRECTED_TEXT_HEADING,
         page.get("raw_text", "") or "无",
         "",
         "## 校对记录",

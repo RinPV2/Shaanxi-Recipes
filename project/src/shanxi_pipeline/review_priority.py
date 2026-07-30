@@ -10,6 +10,7 @@ from typing import Any
 from .confirmation_reader import parse_confirmation_source
 from .manifest import load_books
 from .recipe_segmenter import _ingredient_region_mask
+from .title_policy import to_fullwidth_parens
 from .utils import is_plausible_dish_title, normalize_text, write_json, write_text
 
 PAGE_REF_RE = re.compile(r"[（(]\s*(?P<page>\d+)\s*[.)）]")
@@ -76,6 +77,10 @@ def _canonical_title(text: str, replacements: Replacements = ()) -> str:
     # 空间:否则每个已被 text_replacements 规范化的字（氽→汆、山查糕→山楂糕)都会变成
     # 一条假缺口。忠实原书的留痕由 work/page_review_md 的校对记录承担,不在这里。
     normalized = apply_text_replacements(normalized, replacements)
+    # 括号全角归一（用户 2026-07-30「括号全部统一」)。_canonical_text 的 NFKC 会把原书
+    # 目录里的全角括号压成半角,而 vault 菜名一侧走 title_policy 归一到全角:两侧必须
+    # 落在同一形态,否则「牛（羊）肉煮馍」与「牛(羊)肉煮馍」永远精确对不上。
+    normalized = to_fullwidth_parens(normalized)
     normalized = normalized.strip(TITLE_TRIM_CHARS)
     # 括号成对时不能剥。原先无条件 strip("()（）") 把「箸头面(油泼面)」削成
     # 「箸头面(油泼面」,只有落单的括号才是解析残留。

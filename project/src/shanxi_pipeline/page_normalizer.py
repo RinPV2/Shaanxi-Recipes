@@ -4,9 +4,11 @@ import re
 from typing import Any
 
 from .models import NormalizedPage
-from .utils import normalize_text
+from .utils import RECIPE_ENUM_WITH_NAME, normalize_text
 
-RECIPE_ENUMERATOR = re.compile(r"^[（(]?[一二三四五六七八九十百零〇0-9]+[）)]\s*.+")
+# 编号口径与 recipe_segmenter.is_recipe_title / strip_recipe_enumerator 共用一处定义
+# （含「编号被铅印污损、被 OCR 读成拉丁乱码」的那一种，见 utils.RECIPE_ENUM_HEAD）。
+RECIPE_ENUMERATOR = RECIPE_ENUM_WITH_NAME
 
 
 def _is_recipe_title(text: str, ignored_titles: set[str], generic_keywords: list[str]) -> bool:
